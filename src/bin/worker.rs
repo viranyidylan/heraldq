@@ -5,6 +5,9 @@ use test_graphile::SendWebhook;
 
 #[tokio::main] 
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    println!("[worker] >>> Spinning up");
+
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:xi23pe@localhost/sliq".to_string());
     // Create a PostgreSQL connection pool
@@ -13,6 +16,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .connect(&database_url)
         .await
         .unwrap();
+
+    println!("[worker] >>> database connection established");
 
     // Initialize and run the worker
     let worker = graphile_worker::WorkerOptions::default()
@@ -33,6 +38,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init()
         .await?;
     
+    println!("[worker] >>> graphile configured");
+    println!("[worker] >>> starting worker...");
+
     // start worker
     worker.run().await?;
 

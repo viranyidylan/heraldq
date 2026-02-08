@@ -17,6 +17,7 @@ struct AppState {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("[api] >>> starting api");
     let schema = "graphile_worker";
     
     // Create a PostgreSQL connection pool
@@ -42,6 +43,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     
+    println!("[api] >>> listening...");
+
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
