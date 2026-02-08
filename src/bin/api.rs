@@ -4,7 +4,7 @@ use sqlx::{Pool, Postgres};
 use test_graphile::{SendWebhook, WebhookRequest};
 use tokio;
 use axum::{
-    Router, extract::{self, State}, http::request, routing::post
+    Router, extract::{self, State}, http::request, routing::{post,get}
 };
 use ulid::Ulid;
 
@@ -38,6 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let app = Router::new()
+        .route("/", get(hi))
         .route("/webhook", post(add_job))
         .with_state(state);
     
@@ -56,6 +57,10 @@ async fn shutdown_signal() {
     tokio::signal::ctrl_c()
         .await
         .expect("failed to install CTRL+C signal handler");
+}
+
+async fn hi(State(state): State<AppState>) -> String {
+    "Hello Dylan".to_string()
 }
 
 async fn add_job(
