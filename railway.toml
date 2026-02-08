@@ -1,0 +1,15 @@
+[build]
+builder = "nixpacks"
+
+[[services]]
+name = "api"
+build.cmd = "cargo build --release --bin api"
+start.cmd = "./target/release/api"
+
+[services.env]
+PORT = "3000"
+
+[[services]]
+name = "worker"
+build.cmd = "cargo build --release --bin worker"
+start.cmd = "./target/release/worker"

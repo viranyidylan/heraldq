@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["...", "postgresql"]
+
+[phases.build]
+cmds = ["cargo build --release"]
+
+[start]
+cmd = "echo 'Use railway.toml service-specific commands'"
