@@ -16,7 +16,7 @@ struct AppState {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
     println!("[api] >>> starting api");
     let schema = "graphile_worker";
     
@@ -26,7 +26,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pg_pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(5)
         .connect(&database_url)
-        .await?;
+        .await
+        .unwrap();
 
     // Get a WorkerUtils instance to manage jobs
     let utils = WorkerUtils::new(pg_pool.clone(), schema.to_string());
@@ -49,9 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
-        .await?;
-
-    Ok(())
+        .await;
 }
 
 async fn shutdown_signal() {
@@ -76,23 +75,6 @@ async fn add_job(
             id: Ulid::new().to_string(),
             destination: request_body.destination.to_string(),
             payload: request_body.payload
-        },
-        Default::default(), // Use default job options
-    ).await;
-}
-
-async fn mock_job( 
-    State(state): State<AppState>,
-    extract::Json(payload): extract::Json<WebhookRequest>
-) {
-    println!("[api] Received a post to add_job()");
-
-    // Type-safe method (recommended):
-    let _ = state.worker_utils.add_job(
-        SendWebhook {
-            id: Ulid::new().to_string(),
-            destination: "https://webhook.site/d6200f3e-42c1-4b5a-aed0-69dcd23f4942".to_string(),
-            payload: json!({ "A": 65, "B": 66, "C": 67 })
         },
         Default::default(), // Use default job options
     ).await;
