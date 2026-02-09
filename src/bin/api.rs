@@ -41,11 +41,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/", get(hi))
         .route("/webhook", post(add_job))
         .with_state(state);
-    
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    
-    println!("[api] >>> listening...");
 
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    println!("[api] >>> listening at address: {}", &addr); 
+    
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
