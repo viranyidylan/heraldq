@@ -13,7 +13,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 RUN cargo build --release --bin api
 
-FROM debian:bookworm-slim AS runtime
+FROM ubuntu:24.04 AS runtime
 WORKDIR /app
 
 # Install OpenSSL and CA certificates (required for HTTPS requests)
