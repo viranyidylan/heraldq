@@ -12,7 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| "postgres://postgres:xi23pe@localhost/sliq".to_string());
     // Create a PostgreSQL connection pool
     let pg_pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(10)
         .connect(&database_url)
         .await
         .unwrap();
