@@ -1,11 +1,14 @@
-use graphile_worker::{WorkerUtils};
-use serde_json::json;
+use graphile_worker::{JobSpecBuilder, WorkerUtils};
+use reqwest::StatusCode;
+use serde::{Deserialize, Serialize};
+use serde_json::{json,Value};
 use sqlx::{Pool, Postgres};
-use test_graphile::{SendWebhook, WebhookRequest};
+use test_graphile::{SCHEMA, SendWebhook, WebhookRequest};
 use tokio;
 use axum::{
-    Router, extract::{self, State}, http::request, routing::{post,get}
+    Json, Router, extract::{self, State}, http::request, routing::{get, post}
 };
+use rand::RngExt;
 use ulid::Ulid;
 
 #[derive(Clone)]
@@ -14,6 +17,12 @@ struct AppState {
     worker_utils: WorkerUtils,
     schema: String,
 }
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct HealthCheckResponse {
+    pub status: i32,
+    pub message: String,
+} 
 
 #[tokio::main]
 async fn main() {
@@ -34,24 +43,26 @@ async fn main() {
     let state = AppState {
         pg_pool,
         worker_utils: utils,
-        schema: schema.to_string(),
+        schema: SCHEMA.to_string(),
     };
 
     let app = Router::new()
-        .route("/", get(|| async { "Hi Dylan" }))
-        // .route("/", get(hi))
+        .route("/ping", get(ping))
+        .route("/health", get(health))
         .route("/webhook", post(add_job))
+        .route("/mock", post(mock))
         .with_state(state);
 
-    let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     println!("App listening at address: {}", &addr); 
-    axum::serve(listener, app).await.unwrap();
+    // axum::serve(listener, app).await.unwrap();
     
-    // axum::serve(listener, app)
-    //     .with_graceful_shutdown(shutdown_signal())
-    //     .await;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap();
 }
 
 async fn shutdown_signal() {
@@ -60,23 +71,58 @@ async fn shutdown_signal() {
         .expect("failed to install CTRL+C signal handler");
 }
 
-async fn hi(State(state): State<AppState>) -> String {
-    "Hello Dylan".to_string()
+async fn ping() -> String {
+    "pong".to_string()
+}
+
+async fn health() -> axum::Json<HealthCheckResponse> {
+    Json(HealthCheckResponse { status: 200, message: "healthy".to_string() })
 }
 
 async fn add_job(
     State(state): State<AppState>,
     extract::Json(request_body): extract::Json<WebhookRequest>
-) {
+) -> StatusCode {
     println!("[api] Received a post to add_job()");
 
     // Type-safe method (recommended):
-    let _ = state.worker_utils.add_job(
+    match state.worker_utils.add_job(
         SendWebhook {
             id: Ulid::new().to_string(),
             destination: request_body.destination.to_string(),
             payload: request_body.payload
         },
-        Default::default(), // Use default job options
-    ).await;
+        JobSpecBuilder::new()
+            .max_attempts(3)
+            .build()
+        // Default::default(), // Use default job options, default max_attempts is 25 
+    ).await {
+        Ok(job) => {
+            println!("Job with id {} added", job.id());
+            StatusCode::ACCEPTED
+        }, 
+        Err(e) => {
+            eprintln!("Error: Could not add job to graphile: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }
+
+async fn mock(    
+    State(state): State<AppState>,
+    extract::Json(payload): extract::Json<Value>
+) -> StatusCode {
+    let roll = rand::rng().random_range(0..100);
+
+    println!("[/chaos] payload='{}' roll={}", payload, roll);
+
+    if roll < 10 {
+        println!("[api] /chaos 200 OK");
+        StatusCode::OK               // 10%
+    } else if roll < 15 {
+        println!("[api] /chaos 418 IM A TEAPOT");
+        StatusCode::IM_A_TEAPOT      // 5%
+    } else {
+        println!("[api] /chaos 500 INTERNAL SERVER ERROR");
+        StatusCode::INTERNAL_SERVER_ERROR // 85%
+    }}
