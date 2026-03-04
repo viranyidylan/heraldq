@@ -19,11 +19,11 @@
 - [ x ] Use shared `SCHEMA` constant in both binaries
 
 ### Session 2 (2-3 hrs) - Include notion of a "tenant" along with their api keys
-- [ ] Add `tenant` table
-- [ ] Add `api_keys` table
-- [ ] Write migration SQL for `api_keys` table
-- [ ] Write migration SQL for `tenant` table
-- [ ] Wire `sqlx::migrate!` macro into API startup
+- [ x ] Add `tenant` table
+- [ x ] Add `api_keys` table
+- [ x ] Write migration SQL for `api_keys` table
+- [ x ] Write migration SQL for `tenant` table
+- [ x ] Wire `sqlx::migrate!` macro into API startup
 
 ### Session 4 (2–3 hrs) — Auth middleware
 - [ ] SHA-256 hash incoming bearer token
