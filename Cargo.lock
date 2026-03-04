@@ -2645,10 +2645,12 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "graphile_worker",
+ "hex",
  "rand 0.10.0",
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tokio",
  "tower_governor",

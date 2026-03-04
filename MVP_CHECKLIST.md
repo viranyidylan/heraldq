@@ -61,7 +61,7 @@
 
 ### Session 8 (1–2 hrs) — Rate limiting
 - [ ] Wire `tower_governor` to `POST /webhook`
-- [ ] 100 req/min per IP as starting point
+- [ ] 1000 req/min per IP as starting point
 
 ### Session 9 (1–2 hrs) — Some decent basic metrics graph/dashboard
 - [ ] start with plan mode to think through the absolute basics for some metrics dashboard
