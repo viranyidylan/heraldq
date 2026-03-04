@@ -37,6 +37,11 @@ async fn main() {
         .connect(&database_url).await
         .expect("Failed to connect to database");
 
+    sqlx::migrate!("./migrations")
+        .run(&pg_pool)
+        .await
+        .expect("[api] Failed to run database migrations");
+
     // Get a WorkerUtils instance to manage jobs
     let utils = WorkerUtils::new(pg_pool.clone(), schema.to_string());
 

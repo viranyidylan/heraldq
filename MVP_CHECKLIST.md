@@ -18,16 +18,27 @@
 - [ x ] Wire up `shutdown_signal()` to Axum `with_graceful_shutdown()`
 - [ x ] Use shared `SCHEMA` constant in both binaries
 
-### Session 2 (2–3 hrs) — Migrations + API key table
+### Session 2 (2-3 hrs) - Include notion of a "tenant" along with their api keys
+- [ ] Add `tenant` table
+- [ ] Add `api_keys` table
 - [ ] Write migration SQL for `api_keys` table
-- [ ] Write migration SQL for `webhook_dlq` table
+- [ ] Write migration SQL for `tenant` table
 - [ ] Wire `sqlx::migrate!` macro into API startup
 
-### Session 3 (2–3 hrs) — Auth middleware
+### Session 4 (2–3 hrs) — Auth middleware
 - [ ] SHA-256 hash incoming bearer token
 - [ ] Axum extractor that looks up hash in `api_keys`
 - [ ] 401 on missing/invalid/inactive key
 - [ ] Apply extractor to `POST /webhook` only
+
+### Session 5 (2-3 hrs) - Dead Letter Queue
+- [ ] Write migration SQL for `webhook_dlq` table
+- [ ] Write to SQL each place we perma-fail 
+- [ ] Update any migration we need
+
+### Session 8 (1–2 hrs) — Rate limiting
+- [ ] Wire `tower_governor` to `POST /webhook`
+- [ ] Per-key rate limits
 
 ---
 
@@ -53,7 +64,7 @@
 - [ ] 100 req/min per IP as starting point
 
 ### Session 9 (1–2 hrs) — Some decent basic metrics graph/dashboard
-- [ ] start with plan mode to think through the absolute basics
+- [ ] start with plan mode to think through the absolute basics for some metrics dashboard
 
 
 ---
@@ -76,10 +87,14 @@
 
 ---
 
-## Deferred (Post-Launch)
+## Deferred backlog (Post-Launch)
 - HMAC signature verification on outbound webhooks
 - Per-key rate limits
 - Requeue from DLQ
 - Full 30-day delivery history
 - Dashboard UI framework
 - Per-tenant usage metrics
+- DLQ cleanup job? (90 day retention policy)
+- Split out the lib.rs into some more specific modules
+- Upgrade tenant IDs to uuid v7
+- Basic web page

@@ -1,0 +1,57 @@
+# test_graphile
+
+A Rust webhook dispatch service backed by [graphile_worker](https://github.com/leo-duran/graphile-worker-rs) — a PostgreSQL-based job queue.
+
+## Architecture
+
+Two binaries share a single library crate (`src/lib.rs`):
+
+```
+POST /webhook  →  [api]  →  PostgreSQL job queue  →  [worker]  →  target URL
+```
+
+### `api` (Axum HTTP server)
+Accepts incoming webhook requests and enqueues them as durable jobs via `WorkerUtils`. Jobs persist in PostgreSQL, so they survive restarts.
+
+| Route | Description |
+|---|---|
+| `GET /ping` | Liveness check |
+| `GET /health` | Health check (JSON) |
+| `POST /webhook` | Enqueue a webhook dispatch job |
+| `POST /mock` | Chaos endpoint — returns 200 (10%), 418 (5%), 500 (85%) |
+
+### `worker` (graphile_worker consumer)
+Polls the job queue and dispatches `POST` requests to the destination URL.
+
+- **Concurrency:** 30 parallel jobs
+- **Local queue:** batches up to 100 jobs from DB to reduce round-trips; refetches when queue drops below 10
+- **Batch completions:** job completions are flushed every 5ms to reduce SQL round-trips
+
+### Shared (`lib.rs`)
+Defines the `SendWebhook` task and its retry/failure logic:
+
+- **Retry:** server errors (5xx) are retried up to `max_attempts` (default: 3)
+- **Permanent failure:** client errors (4xx) are immediately permanently failed via `permanently_fail_jobs`
+- **DLQ:** once `max_attempts` is exhausted, the failure is logged (TODO: write to a DLQ table in PostgreSQL)
+- **Idempotency:** each job carries a ULID passed as an `Idempotency-Key` header to the target
+
+## Stack
+
+| | |
+|---|---|
+| Language | Rust (edition 2024) |
+| HTTP server | `axum` |
+| Job queue | `graphile_worker` (PostgreSQL-backed) |
+| Database | PostgreSQL via `sqlx` |
+| IDs | `ulid` |
+
+## Running locally
+
+Set `DATABASE_URL` (defaults to `postgres://postgres:xi23pe@localhost/sliq`), then:
+
+```bash
+cargo run --bin api     # starts on PORT (default 3000)
+cargo run --bin worker
+```
+
+Both binaries are also containerised — see `Dockerfile.api` and `Dockerfile.worker`.
