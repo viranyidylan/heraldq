@@ -1,6 +1,6 @@
 # test_graphile
 
-A Rust webhook dispatch service backed by [graphile_worker](https://github.com/leo-duran/graphile-worker-rs) — a PostgreSQL-based job queue.
+A Rust webhook dispatch service backed by [graphile_worker](https://docs.rs/graphile_worker/latest/graphile_worker) — a PostgreSQL-based job queue.
 
 ## Architecture
 
@@ -47,6 +47,8 @@ Defines the `SendWebhook` task and its retry/failure logic:
 
 ## Running locally
 
+You may need to run scripts/setup_db.sh to initialize the DB and user
+
 Set `DATABASE_URL` (defaults to `postgres://postgres:xi23pe@localhost/sliq`), then:
 
 ```bash
@@ -55,3 +57,9 @@ cargo run --bin worker
 ```
 
 Both binaries are also containerised — see `Dockerfile.api` and `Dockerfile.worker`.
+
+curl -w "%{http_code}\n" 
+    -X POST http://localhost:3000/webhook     
+    -H "Authorization: Bearer $SLIQ_KEY"     
+    -H "Content-Type: application/json"     
+    -d '{ "payload": {"hello": "dyl" }, "destination": "http://localhost:3000/mock" }'

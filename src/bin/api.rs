@@ -6,9 +6,17 @@ use sqlx::{Pool, Postgres};
 use test_graphile::{SCHEMA, SendWebhook, WebhookRequest};
 use tokio;
 use axum::{
-    Json, Router, extract::{self, State}, http::request, routing::{get, post}
+    Json, 
+    Router, 
+    extract::{self, State, FromRequestParts}, 
+    routing::{get, post},
+    http::{
+        self,
+        request::Parts,
+    }
 };
 use rand::RngExt;
+use sha2::{Sha256, Digest};
 use ulid::Ulid;
 
 #[derive(Clone)]
@@ -23,6 +31,43 @@ pub struct HealthCheckResponse {
     pub status: i32,
     pub message: String,
 } 
+
+struct ValidApiKey {
+    api_key_id: String,
+    tenant_id: String,
+}
+
+impl FromRequestParts<AppState> for ValidApiKey {
+    type Rejection = StatusCode;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+        println!("Checking auth token...");
+
+        let auth_header = parts
+            .headers
+            .get(http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .ok_or(StatusCode::UNAUTHORIZED)?;
+
+        let auth_token = auth_header.strip_prefix("Bearer ")
+            .ok_or(StatusCode::UNAUTHORIZED)?;
+
+        // if auth_header is in the db 
+        let hash = hex::encode(Sha256::digest(auth_token.as_bytes()));
+        let res = sqlx::query!(
+            "SELECT id, tenant_id FROM api_keys WHERE key_hash = $1",
+            hash
+        )
+        .fetch_optional(&state.pg_pool)
+        .await;
+
+        match res {
+            Ok(Some(row)) => Ok(ValidApiKey { api_key_id: row.id.to_string() , tenant_id: row.tenant_id.to_string() }), 
+            Ok(None) => Err(StatusCode::UNAUTHORIZED),
+            Err(e) => Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -86,10 +131,11 @@ async fn health() -> axum::Json<HealthCheckResponse> {
 
 async fn add_job(
     State(state): State<AppState>,
+    api_key: ValidApiKey,
     extract::Json(request_body): extract::Json<WebhookRequest>
 ) -> StatusCode {
     println!("[api] Received a post to add_job()");
-
+    
     // Type-safe method (recommended):
     match state.worker_utils.add_job(
         SendWebhook {

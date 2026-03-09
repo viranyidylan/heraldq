@@ -2646,6 +2646,7 @@ dependencies = [
  "axum",
  "graphile_worker",
  "hex",
+ "http",
  "rand 0.10.0",
  "reqwest",
  "serde",
