@@ -26,10 +26,10 @@
 - [ x ] Wire `sqlx::migrate!` macro into API startup
 
 ### Session 4 (2–3 hrs) — Auth middleware
-- [ ] SHA-256 hash incoming bearer token
-- [ ] Axum extractor that looks up hash in `api_keys`
-- [ ] 401 on missing/invalid/inactive key
-- [ ] Apply extractor to `POST /webhook` only
+- [ x ] SHA-256 hash incoming bearer token
+- [ x ] Axum extractor that looks up hash in `api_keys`
+- [ x ] 401 on missing/invalid/inactive key
+- [ x ] Apply extractor to `POST /webhook` only
 
 ### Session 5 (2-3 hrs) - Dead Letter Queue
 - [ ] Write migration SQL for `webhook_dlq` table
@@ -61,7 +61,7 @@
 
 ### Session 8 (1–2 hrs) — Rate limiting
 - [ ] Wire `tower_governor` to `POST /webhook`
-- [ ] 100 req/min per IP as starting point
+- [ ] 1000 req/min per IP as starting point
 
 ### Session 9 (1–2 hrs) — Some decent basic metrics graph/dashboard
 - [ ] start with plan mode to think through the absolute basics for some metrics dashboard
@@ -77,6 +77,11 @@
 - [ ] Set `DATABASE_URL` on both Railway services
 - [ ] Confirm migrations run on startup
 - [ ] Smoke test: enqueue via curl → verify delivery → check `/status`
+
+### Session 9.5 (2 hours) - Essential Unit Tests
+- [ ] worker.rs test
+- [ ] api.rs test
+- [ ] lib.rs test
 
 ### Session 10 (2 hrs) — End-to-end hardening
 - [ ] Test retry path: 500 endpoint → retries on schedule → lands in DLQ after 6 attempts
