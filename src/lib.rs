@@ -1,11 +1,14 @@
-use std::{f32::consts::E, result, time::Duration};
-use graphile_worker::{IntoTaskHandlerResult, JobSpecBuilder, TaskHandler, WorkerContext, WorkerContextExt};
+use graphile_worker::{
+    IntoTaskHandlerResult, JobSpecBuilder, TaskHandler, WorkerContext, WorkerContextExt,
+};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::{f32::consts::E, result, time::Duration};
 use ulid::Ulid;
-use reqwest::{
-    Client
-};
+
+pub mod config;
+pub mod error;
 
 pub const SCHEMA: &str = "graphile_worker";
 
@@ -27,16 +30,23 @@ impl TaskHandler for SendWebhook {
     const IDENTIFIER: &'static str = "send_webhook";
 
     async fn run(self, _ctx: WorkerContext) -> impl IntoTaskHandlerResult {
-        println!("[worker] {} Dispatching webhook {} to {} with subject '{}'", 
-            _ctx.worker_id(), 
-            self.id, 
-            self.destination, 
-            self.payload);
-        
+        println!(
+            "[worker] {} Dispatching webhook {} to {} with subject '{}'",
+            _ctx.worker_id(),
+            self.id,
+            self.destination,
+            self.payload
+        );
+
         let run_at = _ctx.job().run_at();
         let retry_count = _ctx.job().attempts();
-        println!("[worker] {} run at: {}, retry_count '{}'", _ctx.worker_id(), run_at, retry_count);
-        
+        println!(
+            "[worker] {} run at: {}, retry_count '{}'",
+            _ctx.worker_id(),
+            run_at,
+            retry_count
+        );
+
         let attempts = _ctx.job().attempts();
         let max_attempts = _ctx.job().max_attempts();
         let job_id = _ctx.job().id();
@@ -60,7 +70,8 @@ async fn try_dispatch_webhook(job: SendWebhook, _ctx: WorkerContext) -> Result<(
     let http: Client = reqwest::Client::new();
     let job_id = _ctx.job().id();
 
-    let http_result = http.post(&job.destination)
+    let http_result = http
+        .post(&job.destination)
         .header("Content-Type", "application/json")
         .header("Idempotency-Key", &job.id)
         .json(&job.payload)
@@ -76,14 +87,22 @@ async fn try_dispatch_webhook(job: SendWebhook, _ctx: WorkerContext) -> Result<(
         println!("[worker] {} Success for job {}'", _ctx.worker_id(), job_id);
         return Ok(());
     }
-    
+
     if status.is_server_error() {
-        println!("[worker] {} Server error, will retry job: {}", _ctx.worker_id(), job_id);
+        println!(
+            "[worker] {} Server error, will retry job: {}",
+            _ctx.worker_id(),
+            job_id
+        );
         return Err(format!("server error: {}", status));
     }
-    
+
     if status.is_client_error() {
-        println!("[worker] {} Client error, will not retry job: '{}'", _ctx.worker_id(), job_id);
+        println!(
+            "[worker] {} Client error, will not retry job: '{}'",
+            _ctx.worker_id(),
+            job_id
+        );
 
         // TODO: write to DLQ table in postgres
 
@@ -96,5 +115,10 @@ async fn try_dispatch_webhook(job: SendWebhook, _ctx: WorkerContext) -> Result<(
     }
 
     // default: treat unknown as retryable
-    Err(format!("[worker] {} unexpected status: {} for job: {}", _ctx.worker_id(), status, job_id))
+    Err(format!(
+        "[worker] {} unexpected status: {} for job: {}",
+        _ctx.worker_id(),
+        status,
+        job_id
+    ))
 }

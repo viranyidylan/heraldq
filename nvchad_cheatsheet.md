@@ -38,6 +38,8 @@ space + / : toggle comment
 
 space + h/v :  terminal
 
+:e src/{new_file} : create/open a new file (creates on first save)
+
 ctrl + ] : go to definition
 
 ctrl + g : get the full path of the current file

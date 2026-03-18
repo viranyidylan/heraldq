@@ -1,85 +1,84 @@
+use axum::{
+    Json, Router,
+    extract::{self, FromRequestParts, State},
+    http::{self, request::Parts},
+    routing::{get, post},
+};
 use graphile_worker::{JobSpecBuilder, WorkerUtils};
+use rand::RngExt;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_json::{json,Value};
-use sqlx::{Pool, Postgres};
-use test_graphile::{SCHEMA, SendWebhook, WebhookRequest};
-use tokio;
-use axum::{
-    Json, 
-    Router, 
-    extract::{self, State, FromRequestParts}, 
-    routing::{get, post},
-    http::{
-        self,
-        request::Parts,
-    }
-};
-use rand::RngExt;
-use sha2::{Sha256, Digest};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use sliq::{SendWebhook, WebhookRequest, config::AppConfig, error::AppError};
+use sqlx::PgPool;
 use ulid::Ulid;
-
-#[derive(Clone)]
-struct AppState {
-    pg_pool: Pool<Postgres>,
-    worker_utils: WorkerUtils,
-    schema: String,
-}
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct HealthCheckResponse {
     pub status: i32,
     pub message: String,
-} 
+}
 
 struct ValidApiKey {
     api_key_id: String,
     tenant_id: String,
 }
 
-impl FromRequestParts<AppState> for ValidApiKey {
-    type Rejection = StatusCode;
+#[derive(Clone)]
+struct AppState {
+    pg_pool: PgPool,
+    worker_utils: WorkerUtils,
+    schema: String,
+}
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+impl FromRequestParts<AppState> for ValidApiKey {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         println!("Checking auth token...");
 
         let auth_header = parts
             .headers
             .get(http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
-            .ok_or(StatusCode::UNAUTHORIZED)?;
+            .ok_or(AppError::Unauthorized)?;
 
-        let auth_token = auth_header.strip_prefix("Bearer ")
-            .ok_or(StatusCode::UNAUTHORIZED)?;
+        let auth_token = auth_header
+            .strip_prefix("Bearer ")
+            .ok_or(AppError::Unauthorized)?;
 
-        // if auth_header is in the db 
+        // if auth_header is in the db
         let hash = hex::encode(Sha256::digest(auth_token.as_bytes()));
         let res = sqlx::query!(
             "SELECT id, tenant_id FROM api_keys WHERE key_hash = $1",
             hash
         )
         .fetch_optional(&state.pg_pool)
-        .await;
+        .await?;
 
         match res {
-            Ok(Some(row)) => Ok(ValidApiKey { api_key_id: row.id.to_string() , tenant_id: row.tenant_id.to_string() }), 
-            Ok(None) => Err(StatusCode::UNAUTHORIZED),
-            Err(e) => Err(StatusCode::INTERNAL_SERVER_ERROR)
+            Some(row) => Ok(ValidApiKey {
+                api_key_id: row.id.to_string(),
+                tenant_id: row.tenant_id.to_string(),
+            }),
+            None => Err(AppError::Unauthorized),
         }
     }
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[api] >>> starting api");
-    let schema = "graphile_worker";
-    
-    // Create a PostgreSQL connection pool
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://postgres:xi23pe@localhost/sliq".to_string());
+    let config = AppConfig::from_env()?;
+
     let pg_pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(5)
-        .connect(&database_url).await
+        .connect(&config.database_url.clone())
+        .await
         .expect("Failed to connect to database");
 
     sqlx::migrate!("./migrations")
@@ -88,12 +87,12 @@ async fn main() {
         .expect("[api] Failed to run database migrations");
 
     // Get a WorkerUtils instance to manage jobs
-    let utils = WorkerUtils::new(pg_pool.clone(), schema.to_string());
+    let utils = WorkerUtils::new(pg_pool.clone(), config.schema.clone());
 
     let state = AppState {
         pg_pool,
         worker_utils: utils,
-        schema: SCHEMA.to_string(),
+        schema: config.schema,
     };
 
     let app = Router::new()
@@ -106,13 +105,13 @@ async fn main() {
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    println!("App listening at address: {}", &addr); 
-    // axum::serve(listener, app).await.unwrap();
-    
+    println!("App listening at address: {}", &addr);
+
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
-        .await
-        .unwrap();
+        .await?;
+
+    Ok(())
 }
 
 async fn shutdown_signal() {
@@ -126,42 +125,37 @@ async fn ping() -> String {
 }
 
 async fn health() -> axum::Json<HealthCheckResponse> {
-    Json(HealthCheckResponse { status: 200, message: "healthy".to_string() })
+    Json(HealthCheckResponse {
+        status: 200,
+        message: "healthy".to_string(),
+    })
 }
 
 async fn add_job(
     State(state): State<AppState>,
-    api_key: ValidApiKey,
-    extract::Json(request_body): extract::Json<WebhookRequest>
-) -> StatusCode {
+    _api_key: ValidApiKey,
+    extract::Json(request_body): extract::Json<WebhookRequest>,
+) -> Result<StatusCode, AppError> {
     println!("[api] Received a post to add_job()");
-    
-    // Type-safe method (recommended):
-    match state.worker_utils.add_job(
-        SendWebhook {
-            id: Ulid::new().to_string(),
-            destination: request_body.destination.to_string(),
-            payload: request_body.payload
-        },
-        JobSpecBuilder::new()
-            .max_attempts(3)
-            .build()
-        // Default::default(), // Use default job options, default max_attempts is 25 
-    ).await {
-        Ok(job) => {
-            println!("Job with id {} added", job.id());
-            StatusCode::ACCEPTED
-        }, 
-        Err(e) => {
-            eprintln!("Error: Could not add job to graphile: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-    }
+
+    state
+        .worker_utils
+        .add_job(
+            SendWebhook {
+                id: Ulid::new().to_string(),
+                destination: request_body.destination.to_string(),
+                payload: request_body.payload,
+            },
+            JobSpecBuilder::new().max_attempts(3).build(), // Default::default(), // Use default job options, default max_attempts is 25
+        )
+        .await?;
+
+    Ok(StatusCode::ACCEPTED)
 }
 
-async fn mock(    
+async fn mock(
     State(state): State<AppState>,
-    extract::Json(payload): extract::Json<Value>
+    extract::Json(payload): extract::Json<Value>,
 ) -> StatusCode {
     let roll = rand::rng().random_range(0..100);
 
@@ -169,11 +163,12 @@ async fn mock(
 
     if roll < 10 {
         println!("[api] /chaos 200 OK");
-        StatusCode::OK               // 10%
+        StatusCode::OK // 10%
     } else if roll < 15 {
         println!("[api] /chaos 418 IM A TEAPOT");
-        StatusCode::IM_A_TEAPOT      // 5%
+        StatusCode::IM_A_TEAPOT // 5%
     } else {
         println!("[api] /chaos 500 INTERNAL SERVER ERROR");
         StatusCode::INTERNAL_SERVER_ERROR // 85%
-    }}
+    }
+}
