@@ -7,6 +7,7 @@ use serde_json::Value;
 use std::{f32::consts::E, result, time::Duration};
 use ulid::Ulid;
 
+pub mod auth;
 pub mod config;
 pub mod error;
 

@@ -1,6 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{self, FromRequestParts, State},
+    extract::{self, FromRef, FromRequestParts, State},
     http::{self, request::Parts},
     routing::{get, post},
 };
@@ -9,7 +9,6 @@ use rand::RngExt;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use sliq::{SendWebhook, WebhookRequest, config::AppConfig, error::AppError};
 use sqlx::PgPool;
 use ulid::Ulid;
@@ -26,47 +25,15 @@ struct ValidApiKey {
 }
 
 #[derive(Clone)]
-struct AppState {
+pub struct AppState {
     pg_pool: PgPool,
     worker_utils: WorkerUtils,
     schema: String,
 }
 
-impl FromRequestParts<AppState> for ValidApiKey {
-    type Rejection = AppError;
-
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &AppState,
-    ) -> Result<Self, Self::Rejection> {
-        println!("Checking auth token...");
-
-        let auth_header = parts
-            .headers
-            .get(http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .ok_or(AppError::Unauthorized)?;
-
-        let auth_token = auth_header
-            .strip_prefix("Bearer ")
-            .ok_or(AppError::Unauthorized)?;
-
-        // if auth_header is in the db
-        let hash = hex::encode(Sha256::digest(auth_token.as_bytes()));
-        let res = sqlx::query!(
-            "SELECT id, tenant_id FROM api_keys WHERE key_hash = $1",
-            hash
-        )
-        .fetch_optional(&state.pg_pool)
-        .await?;
-
-        match res {
-            Some(row) => Ok(ValidApiKey {
-                api_key_id: row.id.to_string(),
-                tenant_id: row.tenant_id.to_string(),
-            }),
-            None => Err(AppError::Unauthorized),
-        }
+impl FromRef<AppState> for PgPool {
+    fn from_ref(app_state: &AppState) -> PgPool {
+        app_state.pg_pool.clone()
     }
 }
 
@@ -133,7 +100,7 @@ async fn health() -> axum::Json<HealthCheckResponse> {
 
 async fn add_job(
     State(state): State<AppState>,
-    _api_key: ValidApiKey,
+    _api_key: sliq::auth::ValidApiKey,
     extract::Json(request_body): extract::Json<WebhookRequest>,
 ) -> Result<StatusCode, AppError> {
     println!("[api] Received a post to add_job()");
