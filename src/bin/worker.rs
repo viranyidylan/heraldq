@@ -1,5 +1,5 @@
 use graphile_worker::{self, LocalQueueConfig, RefetchDelayConfig};
-use sliq::{SCHEMA, SendWebhook, config::AppConfig};
+use sliq::{SendWebhook, config::AppConfig};
 use std::time::Duration;
 
 #[tokio::main]

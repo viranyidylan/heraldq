@@ -1,11 +1,10 @@
 use graphile_worker::{
-    IntoTaskHandlerResult, JobSpecBuilder, TaskHandler, WorkerContext, WorkerContextExt,
+    IntoTaskHandlerResult, TaskHandler, WorkerContext, WorkerContextExt,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{f32::consts::E, result, time::Duration};
-use ulid::Ulid;
+use std::time::Duration;
 
 pub mod auth;
 pub mod config;

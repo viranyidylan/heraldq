@@ -1,7 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{self, FromRef, FromRequestParts, State},
-    http::{self, request::Parts},
+    extract::{self, FromRef, State},
     routing::{get, post},
 };
 use graphile_worker::{JobSpecBuilder, WorkerUtils};
@@ -121,7 +120,7 @@ async fn add_job(
 }
 
 async fn mock(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     extract::Json(payload): extract::Json<Value>,
 ) -> StatusCode {
     let roll = rand::rng().random_range(0..100);
