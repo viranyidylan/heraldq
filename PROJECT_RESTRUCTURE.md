@@ -111,8 +111,11 @@ Each step ends with `cargo check` passing before moving on. Never skip this.
 - Move `try_dispatch_webhook` + the `TaskHandler` impl to `dispatch.rs`
 - `webhook/mod.rs` re-exports both
 - `lib.rs` re-exports from `webhook`
+- Share a single `reqwest::Client` instead of constructing one per dispatch. Construct it once at worker startup and pass it into `try_dispatch_webhook` via `WorkerContext` extensions (or a shared state struct). This preserves HTTP connection pooling, TLS session reuse, and gives a single place to configure timeouts/redirect policy.
 
 **Why split model from dispatch:** the model is imported by API handlers, the worker, and eventually the DLQ writer. The dispatch logic is only relevant to the worker's execution path. Keeping them separate means a schema change doesn't visually mix with a retry logic change.
+
+ctx.get_ext::<T>() is exactly the idiomatic path. You'd wrap reqwest::Client in an Arc (or put it inside a shared state struct), register it via .add_extension() at worker startup, and pull it out in try_dispatch_webhook with ctx.get_ext(). Clean, no global state, no per-request allocation.
 
 ---
 
