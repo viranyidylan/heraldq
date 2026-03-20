@@ -8,7 +8,7 @@ use rand::RngExt;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sliq::{SendWebhook, WebhookRequest, config::AppConfig, error::AppError};
+use sliq::{SendWebhook, WebhookRequest, config::AppConfig, db, error::AppError};
 use sqlx::PgPool;
 use ulid::Ulid;
 
@@ -41,16 +41,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[api] >>> starting api");
     let config = AppConfig::from_env()?;
 
-    let pg_pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&config.database_url.clone())
-        .await
-        .expect("Failed to connect to database");
+    // let pg_pool = sqlx::postgres::PgPoolOptions::new()
+    //     .max_connections(5)
+    //     .connect(&config.database_url.clone())
+    //     .await
+    //     .expect("Failed to connect to database");
 
-    sqlx::migrate!("./migrations")
-        .run(&pg_pool)
-        .await
-        .expect("[api] Failed to run database migrations");
+    let pg_pool = db::create_pool(&config).await?;
+
+    // sqlx::migrate!("./migrations")
+    //     .run(&pg_pool)
+    //     .await
+    //     .expect("[api] Failed to run database migrations");
+
+    db::run_migrations(&pg_pool).await;
 
     // Get a WorkerUtils instance to manage jobs
     let utils = WorkerUtils::new(pg_pool.clone(), config.schema.clone());

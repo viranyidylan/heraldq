@@ -7,6 +7,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 pub mod auth;
+pub mod db;
 pub mod config;
 pub mod error;
 
