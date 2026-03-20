@@ -38,22 +38,10 @@ impl FromRef<AppState> for PgPool {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("[api] >>> starting api");
+
     let config = AppConfig::from_env()?;
-
-    // let pg_pool = sqlx::postgres::PgPoolOptions::new()
-    //     .max_connections(5)
-    //     .connect(&config.database_url.clone())
-    //     .await
-    //     .expect("Failed to connect to database");
-
+    
     let pg_pool = db::create_pool(&config).await?;
-
-    // sqlx::migrate!("./migrations")
-    //     .run(&pg_pool)
-    //     .await
-    //     .expect("[api] Failed to run database migrations");
-
     db::run_migrations(&pg_pool).await;
 
     // Get a WorkerUtils instance to manage jobs
