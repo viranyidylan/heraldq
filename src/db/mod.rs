@@ -1,20 +1,20 @@
 use sqlx::PgPool;
 
-use crate::{config::AppConfig, error::AppError};
+use crate::{config::AppConfig};
 
-pub async fn create_pool(config: &AppConfig) -> Result<PgPool, AppError> {
+pub async fn create_pool(config: &AppConfig) -> Result<PgPool, sqlx::Error> {
     let pg_pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(5)
         .connect(config.database_url.as_ref())
-        .await
-        .expect("Failed to connect to database");
+        .await?;
 
     Ok(pg_pool)
 }
 
-pub async fn run_migrations(pool: &PgPool) {
+pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
     sqlx::migrate!("./migrations")
         .run(pool)
-        .await
-        .expect("[api] Failed to run database migrations");
+        .await?;
+
+    Ok(())
 }

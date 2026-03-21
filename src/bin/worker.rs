@@ -1,5 +1,4 @@
 use graphile_worker::{self, LocalQueueConfig, RefetchDelayConfig};
-use reqwest::Client;
 use sliq::{SendWebhook, WorkerState, config::AppConfig, db};
 use std::time::Duration;
 
