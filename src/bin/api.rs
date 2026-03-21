@@ -5,7 +5,7 @@ use axum::{
 };
 use graphile_worker::{JobSpecBuilder, WorkerUtils};
 use rand::RngExt;
-use reqwest::StatusCode;
+use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sliq::{SendWebhook, WebhookRequest, config::AppConfig, db, error::AppError};
@@ -27,6 +27,7 @@ struct ValidApiKey {
 pub struct AppState {
     pg_pool: PgPool,
     worker_utils: WorkerUtils,
+    http_client: Client,
     schema: String,
 }
 
@@ -47,9 +48,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get a WorkerUtils instance to manage jobs
     let utils = WorkerUtils::new(pg_pool.clone(), config.schema.clone());
 
+    let http = reqwest::Client::new();
+
     let state = AppState {
         pg_pool,
         worker_utils: utils,
+        http_client: http,
         schema: config.schema,
     };
 

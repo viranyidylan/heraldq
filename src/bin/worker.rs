@@ -1,6 +1,9 @@
 use graphile_worker::{self, LocalQueueConfig, RefetchDelayConfig};
-use sliq::{SendWebhook, config::AppConfig};
+use reqwest::Client;
+use sliq::{SendWebhook, WorkerState, config::AppConfig, db};
 use std::time::Duration;
+
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -8,17 +11,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = AppConfig::from_env()?;
 
-    // Create a PostgreSQL connection pool
-    let pg_pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(10)
-        .connect(&config.database_url.clone())
-        .await
-        .expect("Failed to connect to database");
+    let pg_pool = db::create_pool(&config).await?;
+
+    let worker_state = WorkerState {
+        http_client: reqwest::Client::new(),
+    };
 
     println!("[worker] >>> database connection established");
 
     // Initialize and run the worker
     let worker = graphile_worker::WorkerOptions::default()
+        .add_extension(worker_state)
         // LocalQueue batch-fetches jobs from the database to reduce DB load, trading latency for throughput
         .local_queue(
             LocalQueueConfig::default()

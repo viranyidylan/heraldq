@@ -3,6 +3,8 @@ use graphile_worker::{IntoTaskHandlerResult, TaskHandler, WorkerContext, WorkerC
 use reqwest::Client;
 use std::time::Duration;
 
+use crate::WorkerState;
+
 use super::SendWebhook;
 
 #[derive(Debug, thiserror::Error)]
@@ -17,12 +19,21 @@ pub enum DispatchError {
     UnexpectedStatus(reqwest::StatusCode),
     #[error("failed to permanently fail job: {0}")]
     WorkerError(#[from] GraphileWorkerError),
+    #[error("missing worker extension: {0}")]
+    MissingExtension(&'static str),
 }
 
 impl TaskHandler for SendWebhook {
     const IDENTIFIER: &'static str = "send_webhook";
 
     async fn run(self, ctx: WorkerContext) -> impl IntoTaskHandlerResult {
+        let app_state = ctx
+            .get_ext::<WorkerState>()
+            .ok_or(DispatchError::MissingExtension("Worker State"))
+            .unwrap();
+
+        let http_client = &app_state.http_client;
+
         let job = ctx.job();
         let job_id = job.id();
         let attempts = job.attempts();
@@ -39,26 +50,25 @@ impl TaskHandler for SendWebhook {
             run_at
         );
 
-        let res = try_dispatch_webhook(self.clone(), ctx.clone()).await;
+        let res = try_dispatch_webhook(self.clone(), ctx.clone(), http_client).await;
 
-        if let Err(ref e) = res {
-            if attempts >= max_attempts {
-                // TODO: write to DLQ table in postgres
-                eprintln!(
-                    "[worker] [DLQ] FINAL ATTEMPT EXHAUSTED - job {} to {} will NOT be retried. attempts={}/{} error={}",
-                    job_id, self.destination, attempts, max_attempts, e
-                );
-            }
+        if let Err(ref e) = res
+            && attempts >= max_attempts
+        {
+            // TODO: write to DLQ table in postgres
+            eprintln!(
+                "[worker] [DLQ] FINAL ATTEMPT EXHAUSTED - job {} to {} will NOT be retried. attempts={}/{} error={}",
+                job_id, self.destination, attempts, max_attempts, e
+            );
         }
-        res.map_err(|e| e.to_string())
     }
 }
 
 async fn try_dispatch_webhook(
     job: SendWebhook,
     ctx: WorkerContext,
+    http: &Client,
 ) -> Result<(), DispatchError> {
-    let http: Client = reqwest::Client::new();
     let job_id = ctx.job().id();
 
     let response = http
