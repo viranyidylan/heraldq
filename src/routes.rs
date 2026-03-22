@@ -3,21 +3,13 @@ use axum::{
     extract::{self, FromRef, State},
     routing::{get, post},
 };
-use graphile_worker::{JobSpecBuilder, WorkerUtils};
 use rand::RngExt;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
-use ulid::Ulid;
 
-use crate::{SendWebhook, WebhookRequest, auth, error::AppError};
-
-#[derive(Clone)]
-pub struct AppState {
-    pub pg_pool: PgPool,
-    pub worker_utils: WorkerUtils,
-}
+use crate::{AppState, WebhookRequest, auth, error::AppError, webhook};
 
 impl FromRef<AppState> for PgPool {
     fn from_ref(app_state: &AppState) -> PgPool {
@@ -58,17 +50,7 @@ async fn add_job(
 ) -> Result<StatusCode, AppError> {
     println!("[api] Received a post to add_job()");
 
-    state
-        .worker_utils
-        .add_job(
-            SendWebhook {
-                id: Ulid::new().to_string(),
-                destination: request_body.destination.to_string(),
-                payload: request_body.payload,
-            },
-            JobSpecBuilder::new().max_attempts(3).build(),
-        )
-        .await?;
+    webhook::enqueue(&state.worker_utils, request_body).await?;
 
     Ok(StatusCode::ACCEPTED)
 }

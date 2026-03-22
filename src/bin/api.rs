@@ -1,5 +1,5 @@
 use graphile_worker::WorkerUtils;
-use sliq::{config::AppConfig, db, routes};
+use sliq::{AppState, config::AppConfig, db, routes};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -10,7 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let utils = WorkerUtils::new(pg_pool.clone(), config.schema.clone());
 
-    let state = routes::AppState {
+    let state = AppState {
         pg_pool,
         worker_utils: utils,
     };

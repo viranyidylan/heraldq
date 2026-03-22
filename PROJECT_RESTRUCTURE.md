@@ -143,6 +143,44 @@ ctx.get_ext::<T>() is exactly the idiomatic path. You'd wrap reqwest::Client in 
 
 ---
 
+### Step 7: Unit tests — confidence to ship and iterate
+
+**Goal:** cover the logic that would silently break during refactors (like the retry bug that returned `()` instead of propagating errors). Not aiming for coverage metrics — aiming for tests that catch real regressions.
+
+**Priority targets (highest value per line of test):**
+
+1. **`webhook/dispatch.rs`** — the most complex logic in the codebase
+   - `try_dispatch_webhook` returns the right `DispatchError` variant for 2xx, 4xx, 5xx, network failure
+   - `TaskHandler::run` propagates errors (i.e. a failed dispatch does NOT silently succeed)
+   - Max-attempts-exhausted path triggers DLQ logic (once Step 6 lands)
+
+2. **`webhook/enqueue.rs`** — thin now, but will grow with tenant strategies
+   - Produces a valid `SendWebhook` from a `WebhookRequest` (correct ULID, payload passthrough)
+
+3. **`config.rs`** — easy to test, catches env var regressions
+   - `from_env` succeeds with all vars set
+   - `from_env` fails with clear error when required vars are missing
+   - `port` defaults to 3000 when `PORT` is unset, rejects non-numeric values
+
+4. **`auth/mod.rs`** — guards every webhook endpoint
+   - Valid key extracts successfully
+   - Missing/invalid key returns `AppError::Unauthorized`
+
+5. **`error.rs`** — verify `IntoResponse` mappings
+   - Each `AppError` variant produces the expected HTTP status code
+
+**What NOT to test:**
+- `routes.rs` wiring (integration/E2E territory, not unit)
+- `db/mod.rs` pool creation and migrations (requires a live DB — save for integration tests)
+- `ping`, `health` handlers (trivial, no logic)
+
+**Approach:**
+- Use `#[cfg(test)] mod tests` inside each module file — tests live next to the code they cover
+- For `dispatch.rs`, use a local HTTP server (`wiremock` or `axum::Server` in test) to simulate upstream responses — no mocking `reqwest` internals
+- Keep tests fast: no DB, no sleeping, no filesystem. If a test needs a DB, it's an integration test and belongs in `tests/`
+
+---
+
 ## Key Patterns
 
 **`AppError` + `IntoResponse`**
@@ -180,3 +218,4 @@ No domain logic. Readable in under a minute with no prior context.
 | Step 3 | `cargo run --bin api` → `GET /ping` returns `pong`, `POST /webhook` with valid key returns 202 |
 | Step 5 | Both binaries start cleanly; worker polls and dispatches a test job |
 | Step 6 | Enqueue a job to an invalid URL; row appears in `dead_letter_queue` after max attempts |
+| Step 7 | `cargo test` passes; dispatch error propagation, auth rejection, and config parsing all covered |

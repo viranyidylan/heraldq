@@ -52,15 +52,16 @@ impl TaskHandler for SendWebhook {
 
         let res = try_dispatch_webhook(self.clone(), ctx.clone(), http_client).await;
 
-        if let Err(ref e) = res
-            && attempts >= max_attempts
-        {
-            // TODO: write to DLQ table in postgres
-            eprintln!(
-                "[worker] [DLQ] FINAL ATTEMPT EXHAUSTED - job {} to {} will NOT be retried. attempts={}/{} error={}",
-                job_id, self.destination, attempts, max_attempts, e
-            );
+        if let Err(ref e) = res {
+            if attempts >= max_attempts {
+                // TODO: write to DLQ table in postgres
+                eprintln!(
+                    "[worker] [DLQ] FINAL ATTEMPT EXHAUSTED - job {} to {} will NOT be retried. attempts={}/{} error={}",
+                    job_id, self.destination, attempts, max_attempts, e
+                );
+            }
         }
+        res
     }
 }
 
