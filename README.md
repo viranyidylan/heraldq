@@ -58,8 +58,12 @@ cargo run --bin worker
 
 Both binaries are also containerised — see `Dockerfile.api` and `Dockerfile.worker`.
 
+Example payload
+
+```
 curl -w "%{http_code}\n" 
     -X POST http://localhost:3000/webhook     
     -H "Authorization: Bearer $SLIQ_KEY"     
     -H "Content-Type: application/json"     
     -d '{ "payload": {"hello": "dyl" }, "destination": "http://localhost:3000/mock" }'
+```
