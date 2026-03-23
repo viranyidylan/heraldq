@@ -17,7 +17,7 @@ pub async fn enqueue(
                 destination: request_body.destination.to_string(),
                 payload: request_body.payload,
             },
-            JobSpecBuilder::new().max_attempts(3).build(),
+            JobSpecBuilder::new().max_attempts(5).build(),
         )
         .await?;
     Ok(())

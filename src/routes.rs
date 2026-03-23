@@ -63,10 +63,10 @@ async fn mock(
 
     println!("[/chaos] payload='{}' roll={}", payload, roll);
 
-    if roll < 10 {
+    if roll < 40 {
         println!("[api] /chaos 200 OK");
         StatusCode::OK
-    } else if roll < 15 {
+    } else if roll < 10 {
         println!("[api] /chaos 418 IM A TEAPOT");
         StatusCode::IM_A_TEAPOT
     } else {
