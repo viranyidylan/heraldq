@@ -53,12 +53,10 @@
 
 ## Week 2 — DLQ + Observability + Status
 
-### Session 4 (2–3 hrs) — Dead Letter Queue
-- [ ] Fill in `handle_result()` stub in `lib.rs`
-- [ ] Write to `webhook_dlq` on permanent failure (4xx or max attempts exceeded)
+### Session 9 (1 hr) — Dead Letter Queue
 - [ ] `GET /dlq` route — paginated, newest-first, tenant-scoped, auth protected
 
-### Session 6 (2–3 hrs) — Status endpoint + UI
+### Session 10 (2–3 hrs) — Status endpoint + UI
 - [ ] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`
 - [ ] Drive numbers from COUNT queries against graphile tables + `webhook_dlq`
 - [ ] `GET /status.html` inline HTML page, no template engine, vanilla fetch()
