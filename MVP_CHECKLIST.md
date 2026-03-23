@@ -31,6 +31,15 @@
 - [ x ] 401 on missing/invalid/inactive key
 - [ x ] Apply extractor to `POST /webhook` only
 
+
+### Interruption (2 hours MAX) - Project structure refactor
+- [ ] config.rs
+- [ ] error.rs
+- [ ] auth/mod.rs
+- [ ] webhook/model.rs + webhook/dispatch.rs
+- [ ] db/mod.rs
+- [ ] db/dlq.rs
+
 ### Session 5 (2-3 hrs) - Dead Letter Queue
 - [ ] Write migration SQL for `webhook_dlq` table
 - [ ] Write to SQL each place we perma-fail 

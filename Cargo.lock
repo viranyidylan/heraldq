@@ -2314,6 +2314,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
+name = "sliq"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dotenvy",
+ "graphile_worker",
+ "hex",
+ "http",
+ "rand 0.10.0",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower_governor",
+ "ulid",
+ "uuid",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2640,25 +2662,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "test_graphile"
-version = "0.1.0"
-dependencies = [
- "axum",
- "graphile_worker",
- "hex",
- "http",
- "rand 0.10.0",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "tokio",
- "tower_governor",
- "ulid",
-]
-
-[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2969,7 +2972,9 @@ version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2e054861b4bd027cd373e18e8d8d8e6548085000e41290d95ce0c373a654b4a"
 dependencies = [
+ "getrandom 0.3.4",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 
