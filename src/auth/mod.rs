@@ -6,7 +6,7 @@ use crate::error::AppError;
 
 pub struct ValidApiKey {
     api_key_id: String,
-    tenant_id: String,
+    pub tenant_id: uuid::Uuid,
 }
 
 impl<S> FromRequestParts<S> for ValidApiKey
@@ -47,7 +47,7 @@ where
         match res {
             Some(row) => Ok(ValidApiKey {
                 api_key_id: row.id.to_string(),
-                tenant_id: row.tenant_id.to_string(),
+                tenant_id: row.tenant_id,
             }),
             None => Err(AppError::Unauthorized),
         }

@@ -45,12 +45,12 @@ async fn health() -> Json<HealthCheckResponse> {
 
 async fn add_job(
     State(state): State<AppState>,
-    _api_key: auth::ValidApiKey,
+    api_key: auth::ValidApiKey,
     extract::Json(request_body): extract::Json<WebhookRequest>,
 ) -> Result<StatusCode, AppError> {
     println!("[api] Received a post to add_job()");
 
-    webhook::enqueue(&state.worker_utils, request_body).await?;
+    webhook::enqueue(&state.worker_utils, api_key.tenant_id, request_body).await?;
 
     Ok(StatusCode::ACCEPTED)
 }
