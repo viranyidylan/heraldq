@@ -19,4 +19,5 @@ pub struct AppState {
 #[derive(Clone, Debug)]
 pub struct WorkerState {
     pub http_client: Client,
+    pub pg_pool: PgPool,
 }

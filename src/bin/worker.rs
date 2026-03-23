@@ -11,9 +11,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = AppConfig::from_env()?;
 
     let pg_pool = db::create_pool(&config).await?;
+    db::run_migrations(&pg_pool).await?;
 
     let worker_state = WorkerState {
         http_client: reqwest::Client::new(),
+        pg_pool: pg_pool.clone(),
     };
 
     println!("[worker] >>> database connection established");

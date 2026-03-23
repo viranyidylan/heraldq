@@ -3,7 +3,7 @@ use graphile_worker::{IntoTaskHandlerResult, TaskHandler, WorkerContext, WorkerC
 use reqwest::Client;
 use std::time::Duration;
 
-use crate::WorkerState;
+use crate::{WorkerState, db};
 
 use super::SendWebhook;
 
@@ -33,6 +33,7 @@ impl TaskHandler for SendWebhook {
             .unwrap();
 
         let http_client = &app_state.http_client;
+        let pg_pool = &app_state.pg_pool;
 
         let job = ctx.job();
         let job_id = job.id();
@@ -54,7 +55,10 @@ impl TaskHandler for SendWebhook {
 
         if let Err(ref e) = res {
             if attempts >= max_attempts {
+
                 // TODO: write to DLQ table in postgres
+                db::dlq::insert(&pg_pool, self.clone(), job.clone()).await;
+
                 eprintln!(
                     "[worker] [DLQ] FINAL ATTEMPT EXHAUSTED - job {} to {} will NOT be retried. attempts={}/{} error={}",
                     job_id, self.destination, attempts, max_attempts, e
@@ -105,6 +109,7 @@ async fn try_dispatch_webhook(
         );
 
         // TODO: write to DLQ table in postgres
+        // db::dlq::insert(&pg_pool, self.clone(), job.clone()).await;
 
         ctx.utils()
             .permanently_fail_jobs(&[*job_id], &format!("client error: {}", status))
