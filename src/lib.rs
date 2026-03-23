@@ -7,8 +7,6 @@ use reqwest::{
     Client
 };
 
-pub mod db;
-
 pub const SCHEMA: &str = "graphile_worker";
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -48,7 +46,6 @@ impl TaskHandler for SendWebhook {
         if let Err(ref e) = res {
             if attempts >= max_attempts {
                 // TODO: write to DLQ table in postgres
-                db::write_to_dlq(&self).await;
                 eprintln!(
                     "[worker] [DLQ] FINAL ATTEMPT EXHAUSTED - job {} to {} will NOT be retried. attempts={}/{} error={}",
                     job_id, self.destination, attempts, max_attempts, e
