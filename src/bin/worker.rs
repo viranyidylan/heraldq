@@ -1,12 +1,18 @@
 use graphile_worker::{self, LocalQueueConfig, RefetchDelayConfig};
 use sliq::{SendWebhook, WorkerState, config::AppConfig, db};
 use std::time::Duration;
+use tracing::info;
 
 
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("[worker] >>> Spinning up");
+    dotenvy::dotenv().ok();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
+    info!("Worker spinning up");
 
     let config = AppConfig::from_env()?;
 
@@ -18,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pg_pool: pg_pool.clone(),
     };
 
-    println!("[worker] >>> database connection established");
+    info!("Database connection established");
 
     // Initialize and run the worker
     let worker = graphile_worker::WorkerOptions::default()
@@ -43,8 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init()
         .await?;
 
-    println!("[worker] >>> graphile configured");
-    println!("[worker] >>> starting worker...");
+    info!("Graphile configured, starting worker");
 
     // start worker
     worker.run().await?;
