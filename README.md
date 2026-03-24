@@ -60,7 +60,7 @@ Both binaries are also containerised — see `Dockerfile.api` and `Dockerfile.wo
 
 Example payload
 
-```
+```bash
 curl -w "%{http_code}\n" 
     -X POST http://localhost:3000/webhook     
     -H "Authorization: Bearer $SLIQ_KEY"     
@@ -68,12 +68,20 @@ curl -w "%{http_code}\n"
     -d '{ "payload": {"hello": "dyl" }, "destination": "http://localhost:3000/mock" }'
 ```
 
-## tracing 
-Add debug! and trace! calls at the points you care about — payload contents, retry decisions, response bodies. These are your "printf but permanent." The convention:
+## Tracing 
+Add `debug!` and `trace!` calls at the points you care about — payload contents, retry decisions, response bodies. These are your "`printf` but permanent." The convention:
+- `info!` — happy-path milestones (what you'd want in prod logs)
+- `debug!` — the stuff you're asking about now: payloads, intermediate state
+- `trace!` — really noisy stuff like raw HTTP bodies, loop iterations
 
-info! — happy-path milestones (what you'd want in prod logs)
-debug! — the stuff you're asking about now: payloads, intermediate state
-trace! — really noisy stuff like raw HTTP bodies, loop iterations
-Run with the right filter — RUST_LOG=sliq_graphile::webhook=debug and you see exactly that module's debug output without noise from hyper/tokio/sqlx.
+Run with the right filter — `RUST_LOG=sliq_graphile::webhook=debug` and you see exactly that module's debug output without noise from hyper/tokio/sqlx.
 
-Structured fields are your friend — you're already doing info!(job_id = %job_id, ...). For payloads, same pattern: debug!(payload = ?payload, url = %url, "dispatching webhook"). The ? uses Debug formatting, % uses Display.
+Structured fields are your friend — you're already doing 
+```rust
+info!(job_id = %job_id, ...)
+```
+For payloads, same pattern: 
+```rust
+debug!(payload = ?payload, url = %url, "dispatching webhook")
+``` 
+The `?` uses Debug formatting, `%` uses Display.
