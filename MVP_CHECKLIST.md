@@ -1,112 +1,115 @@
 # MVP Build Checklist
 
-## Week 1 — Core Correctness + Auth
+## Done
 
-### Session 1 (2–3 hrs) — Fix critical bugs
-- [ x ] Fix `try_dispatch_webhook` to handle 4xx (permanent fail) and 5xx (retry) correctly
-- [ x ] Wire up `permanently_fail_jobs` via `WorkerContext` for 4xx
-- [ x ] Fix `Ok(())` swallowing non-2xx responses
-- [ x ] Replace `"Hi Dylan"` root with `GET /health` returning `{ "status": "ok" }`
-- [ x ] Wire up `shutdown_signal()` to Axum `with_graceful_shutdown()`
-- [ x ] Use shared `SCHEMA` constant in both binaries
-
-### Session 1.2 (1 hr) — Test all bugfixes
-- [ x ] Fix `try_dispatch_webhook` to handle 4xx (permanent fail) and 5xx (retry) correctly
-- [ x ] Wire up `permanently_fail_jobs` via `WorkerContext` for 4xx
-- [ x ] Fix `Ok(())` swallowing non-2xx responses
-- [ x ] Replace `"Hi Dylan"` root with `GET /health` returning `{ "status": "ok" }`
-- [ x ] Wire up `shutdown_signal()` to Axum `with_graceful_shutdown()`
-- [ x ] Use shared `SCHEMA` constant in both binaries
-
-### Session 2 (2-3 hrs) - Include notion of a "tenant" along with their api keys
-- [ x ] Add `tenant` table
-- [ x ] Add `api_keys` table
-- [ x ] Write migration SQL for `api_keys` table
-- [ x ] Write migration SQL for `tenant` table
-- [ x ] Wire `sqlx::migrate!` macro into API startup
-
-### Session 4 (2–3 hrs) — Auth middleware
-- [ x ] SHA-256 hash incoming bearer token
-- [ x ] Axum extractor that looks up hash in `api_keys`
-- [ x ] 401 on missing/invalid/inactive key
-- [ x ] Apply extractor to `POST /webhook` only
-
-
-### Interruption (2 hours MAX) - Project structure refactor
-- [ ] config.rs
-- [ ] error.rs
-- [ ] auth/mod.rs
-- [ ] webhook/model.rs + webhook/dispatch.rs
-- [ ] db/mod.rs
-- [ ] db/dlq.rs
-
-### Session 5 (2-3 hrs) - Dead Letter Queue
-- [ ] Write migration SQL for `webhook_dlq` table
-- [ ] Write to SQL each place we perma-fail 
-- [ ] Update any migration we need
-
-### Session 8 (1–2 hrs) — Rate limiting
-- [ ] Wire `tower_governor` to `POST /webhook`
-- [ ] Per-key rate limits
+- [x] Fix `try_dispatch_webhook` to handle 4xx (permanent fail) and 5xx (retry) correctly
+- [x] Wire up `permanently_fail_jobs` via `WorkerContext` for 4xx
+- [x] Fix `Ok(())` swallowing non-2xx responses
+- [x] Replace `"Hi Dylan"` root with `GET /health` returning `{ "status": "ok" }`
+- [x] Wire up `shutdown_signal()` to Axum `with_graceful_shutdown()`
+- [x] Use shared `SCHEMA` constant in both binaries
+- [x] Add `tenant` + `api_keys` tables with migration SQL
+- [x] Wire `sqlx::migrate!` macro into API startup
+- [x] SHA-256 hash incoming bearer token
+- [x] Axum extractor that looks up hash in `api_keys`
+- [x] 401 on missing/invalid/inactive key
+- [x] Apply extractor to `POST /webhook` only
 
 ---
 
-## Week 2 — DLQ + Observability + Status
+## Up Next — Type System + Security Hardening
 
-### Session 9 (1 hr) — Dead Letter Queue
-- [ ] `GET /dlq` route — paginated, newest-first, tenant-scoped, auth protected
+### Strong ID types — stop storing typed IDs as String
+- [ ] `SendWebhook.id` → `ulid::Ulid` (not `String`)
+- [ ] `ValidApiKey.api_key_id` → `Uuid` (not `String`)
+- [ ] Follow the compiler errors — every serialization/deserialization boundary that touches these fields needs updating
+- [ ] Wire `Ulid` serde support through job queue payload
 
-### Session 10 (2–3 hrs) — Status endpoint + UI
-- [ ] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`
-- [ ] Drive numbers from COUNT queries against graphile tables + `webhook_dlq`
-- [ ] `GET /status.html` inline HTML page, no template engine, vanilla fetch()
+### SSRF hardening — ValidatedUrl newtype (parse, don't validate)
+- [ ] Add `url` crate to Cargo.toml
+- [ ] Create `src/webhook/destination.rs` with `ValidatedUrl` newtype (private inner field)
+- [ ] `ValidatedUrl::parse()`: enforce scheme (https only, http+https in dev), reject private IPs, loopback, link-local 169.254.0.0/16, metadata hostnames
+- [ ] Implement `Deserialize` for `ValidatedUrl` — validation fires at deserialization, invalid destinations never reach handlers
+- [ ] Change `WebhookRequest.destination` and `SendWebhook.destination` to `ValidatedUrl`
+- [ ] Create `DestinationError` enum, wire into `AppError` as 400 (not 500)
+- [ ] Tests: private IPs rejected, loopback rejected, metadata endpoint rejected, valid HTTPS passes, bare IPs rejected
 
-### Session 7 (1–2 hrs) — Structured logging
+### SendWebhook type split — separate domain/job/dispatch concerns
+- [ ] Extract a dispatch-only struct (e.g. `DispatchRequest { destination, payload, idempotency_key }`) for `dispatch_http`
+- [ ] Keep `SendWebhook` as the job queue payload type with `TaskHandler` impl
+- [ ] `run()` constructs the dispatch struct from `SendWebhook` fields
+- [ ] DB persistence functions take only the fields they need
+
+---
+
+## Project Structure Refactor
+
+- [ x ] config.rs
+- [ x ] error.rs
+- [ x ] auth/mod.rs
+- [ x ] webhook/model.rs + webhook/dispatch.rs
+- [ x ] db/mod.rs + db/dlq.rs
+
+---
+
+## Core Features
+
+### Dead Letter Queue
+- [ x ] Write migration SQL for `webhook_dlq` table
+- [ x ] Write to DLQ each place we permanent-fail
+- [ ] `GET /dlq` — paginated, newest-first, tenant-scoped, auth protected
+
+### Structured Logging
 - [ ] Add `tracing` + `tracing-subscriber` with JSON formatter + `EnvFilter`
-- [ ] Log: job enqueued, dispatch attempt #, success, failure with error string
+- [ ] Log: job enqueued, dispatch attempt, success, failure with error context
 - [ ] Initialize in both `main()` functions
 
-### Session 8 (1–2 hrs) — Rate limiting
+### Rate Limiting
 - [ ] Wire `tower_governor` to `POST /webhook`
 - [ ] 1000 req/min per IP as starting point
+- [ ] Per-key rate limits
 
-### Session 9 (1–2 hrs) — Some decent basic metrics graph/dashboard
-- [ ] start with plan mode to think through the absolute basics for some metrics dashboard
-
+### Status + Observability
+- [ ] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`
+- [ ] Drive numbers from COUNT queries against graphile tables + `webhook_dlq`
+- [ ] `GET /status.html` — inline HTML page, vanilla fetch()
+- [ ] Basic metrics dashboard (plan mode first to scope it)
 
 ---
 
-## Week 2.5 — Deploy + Smoke Test + Stress test + Ship
+## Go-to-Market Minimum
 
-### Session 9 (2–3 hrs) — Railway deploy
+- [ ] One-curl demo that proves value end-to-end: `curl -X POST .../api/v1/webhooks` → delivers to a test URL → visible in `/status`
+- [ ] Self-serve API key provisioning (or a manual flow under 2 minutes)
+- [ ] HMAC-SHA256 payload signing on outbound webhooks — table stakes, every serious buyer asks
+- [ ] Stripe integration + single-page pricing ($29 / $79 / $199)
+
+---
+
+## Deploy + Validate
+
+### Railway Deploy
 - [ ] Verify `railway.toml` service split (api + worker) builds cleanly
 - [ ] Confirm both Dockerfiles build for `--release`
 - [ ] Set `DATABASE_URL` on both Railway services
 - [ ] Confirm migrations run on startup
 - [ ] Smoke test: enqueue via curl → verify delivery → check `/status`
 
-### Session 9.5 (2 hours) - Essential Unit Tests
-- [ ] worker.rs test
-- [ ] api.rs test
-- [ ] lib.rs test
-
-### Session 10 (2 hrs) — End-to-end hardening
-- [ ] Test retry path: 500 endpoint → retries on schedule → lands in DLQ after 6 attempts
-- [ ] Test permanent fail: 4xx endpoint → immediate DLQ, no retries
-- [ ] Test auth: 401 on missing/wrong key
+### End-to-End Hardening
+- [ ] Retry path: 500 endpoint → retries on schedule → lands in DLQ after max attempts
+- [ ] Permanent fail: 4xx endpoint → immediate DLQ, no retries
+- [ ] Auth: 401 on missing/wrong key
 - [ ] Seed one API key per early test customer
 - [ ] Share `/status.html` URL with first users
 
 ---
 
-## Deferred backlog (Post-Launch)
+## Deferred Backlog (Post-Launch)
 - HMAC signature verification on outbound webhooks
-- Per-key rate limits
 - Requeue from DLQ
 - Full 30-day delivery history
 - Dashboard UI framework
 - Per-tenant usage metrics
-- DLQ cleanup job? (90 day retention policy)
-- Split out the lib.rs into some more specific modules
-- Upgrade tenant IDs to uuid v7
-- Basic web page
+- DLQ cleanup job (90-day retention policy)
+- Upgrade tenant IDs to UUID v7
+- Basic landing page

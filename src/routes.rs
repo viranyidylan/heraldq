@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
 
+use tracing::{debug, info};
+
 use crate::{AppState, WebhookRequest, auth, error::AppError, webhook};
 
 impl FromRef<AppState> for PgPool {
@@ -48,7 +50,7 @@ async fn add_job(
     api_key: auth::ValidApiKey,
     extract::Json(request_body): extract::Json<WebhookRequest>,
 ) -> Result<StatusCode, AppError> {
-    println!("[api] Received a post to add_job()");
+    info!(tenant_id = %api_key.tenant_id, "Webhook enqueue requested");
 
     webhook::enqueue(&state.worker_utils, api_key.tenant_id, request_body).await?;
 
@@ -61,16 +63,14 @@ async fn mock(
 ) -> StatusCode {
     let roll = rand::rng().random_range(0..100);
 
-    println!("[/chaos] payload='{}' roll={}", payload, roll);
-
-    if roll < 40 {
-        println!("[api] /chaos 200 OK");
-        StatusCode::OK
-    } else if roll < 10 {
-        println!("[api] /chaos 418 IM A TEAPOT");
+    let status = if roll < 5 {
         StatusCode::IM_A_TEAPOT
-    } else {
-        println!("[api] /chaos 500 INTERNAL SERVER ERROR");
+    } else if roll < 85 {
         StatusCode::INTERNAL_SERVER_ERROR
-    }
+    } else {
+        StatusCode::OK
+    };
+
+    debug!(roll, status = status.as_u16(), "Mock endpoint hit");
+    status
 }
