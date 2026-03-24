@@ -6,7 +6,6 @@ use axum::{
 use rand::RngExt;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sqlx::PgPool;
 
 use tracing::{debug, info};
@@ -59,10 +58,9 @@ async fn add_job(
 
 async fn mock(
     State(_state): State<AppState>,
-    extract::Json(payload): extract::Json<Value>,
 ) -> StatusCode {
     let roll = rand::rng().random_range(0..100);
-
+    
     let status = if roll < 5 {
         StatusCode::IM_A_TEAPOT
     } else if roll < 85 {

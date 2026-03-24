@@ -117,8 +117,8 @@ impl TaskHandler for SendWebhook {
             Err(e) => Err(e),
         };
 
-        if let Err(ref e) = res {
-            if attempts >= max_attempts {
+        if let Err(ref e) = res
+            && attempts >= max_attempts {
                 let _ = db::dlq::insert(pg_pool, self.clone(), job.clone()).await;
                 error!(
                     job_id = %job_id,
@@ -128,7 +128,6 @@ impl TaskHandler for SendWebhook {
                     error = %e,
                     "Final attempt exhausted, job moved to DLQ"
                 );
-            }
         }
         res
     }

@@ -16,6 +16,7 @@ fn extract_bearer_token(headers: &http::HeaderMap) -> Result<String, AppError> {
         .ok_or(AppError::Unauthorized)
 }
 
+#[allow(dead_code)]
 pub struct ValidApiKey {
     api_key_id: String,
     pub tenant_id: uuid::Uuid,
