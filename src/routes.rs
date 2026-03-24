@@ -24,12 +24,21 @@ struct HealthCheckResponse {
     message: String,
 }
 
+#[derive(Deserialize, Serialize)]
+struct StatusResponse {
+    received: i32,
+    delivered: i32,
+    abandoned: i32,
+}
+
 pub fn build(state: AppState) -> Router {
     Router::new()
         .route("/ping", get(ping))
         .route("/health", get(health))
         .route("/webhook", post(add_job))
         .route("/mock", post(mock))
+        .route("/dlq", get(dlq))
+        .route("/status", get(status))
         .with_state(state)
 }
 
@@ -56,11 +65,24 @@ async fn add_job(
     Ok(StatusCode::ACCEPTED)
 }
 
-async fn mock(
-    State(_state): State<AppState>,
-) -> StatusCode {
+async fn status(
+    State(state): State<AppState>,
+    api_key: auth::ValidApiKey,
+) -> Result<Json<StatusResponse>, AppError> {
+    Ok(Json(StatusResponse {
+        abandoned: 5,
+        delivered: 3,
+        received: 1,
+    }))
+}
+
+async fn dlq() {
+    todo!()
+}
+
+async fn mock(State(_state): State<AppState>) -> StatusCode {
     let roll = rand::rng().random_range(0..100);
-    
+
     let status = if roll < 5 {
         StatusCode::IM_A_TEAPOT
     } else if roll < 85 {
