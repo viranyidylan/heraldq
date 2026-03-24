@@ -1,16 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, tenant_id FROM api_keys WHERE key_hash = $1",
+  "query": "INSERT INTO tenants (name, tier) VALUES ($1, 'free') RETURNING id",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 1,
-        "name": "tenant_id",
         "type_info": "Uuid"
       }
     ],
@@ -20,9 +15,8 @@
       ]
     },
     "nullable": [
-      false,
       false
     ]
   },
-  "hash": "9a9a78b2c28b840912c4802384b62b1d4fc3f52f7231e65128e60c09aeadbd2c"
+  "hash": "16846074ff93804aa058d85b0258f17f4e63e4192869255e30f269d4ab4a2098"
 }
