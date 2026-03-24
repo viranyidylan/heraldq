@@ -58,6 +58,14 @@ cargo run --bin worker
 
 Both binaries are also containerised — see `Dockerfile.api` and `Dockerfile.worker`.
 
+To sign up and receive an API key
+
+```bash
+curl -X POST your-service.com/signup \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "My Company"}'
+```
+
 Example payload
 
 ```bash

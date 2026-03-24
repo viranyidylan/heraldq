@@ -1,8 +1,16 @@
 use axum::extract::{FromRef, FromRequestParts};
+use rand::RngExt;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
+use tracing::warn;
 
 use crate::error::AppError;
+
+/// Generate a prefixed API key: `sliq_` + 32 random hex chars (16 bytes).
+pub fn generate_api_key() -> String {
+    let bytes: [u8; 16] = rand::rng().random();
+    format!("sliq_{}", hex::encode(bytes))
+}
 
 fn extract_bearer_token(headers: &http::HeaderMap) -> Result<String, AppError> {
     let auth_header = headers
@@ -37,23 +45,26 @@ where
 
         let auth_token = extract_bearer_token(&parts.headers)?;
 
-        // if auth_header is in the db
         let hash = hex::encode(Sha256::digest(auth_token.as_bytes()));
-        let res = sqlx::query!(
-            "SELECT id, tenant_id FROM api_keys WHERE key_hash = $1",
+        let row = sqlx::query!(
+            "SELECT id, tenant_id, expires_at FROM api_keys WHERE key_hash = $1 AND is_active = true",
             hash
         )
         .fetch_optional(&pg_pool)
-        .await?;
+        .await?
+        .ok_or(AppError::Unauthorized)?;
 
-        // return the result
-        match res {
-            Some(row) => Ok(ValidApiKey {
-                api_key_id: row.id.to_string(),
-                tenant_id: row.tenant_id,
-            }),
-            None => Err(AppError::Unauthorized),
+        if let Some(expires_at) = row.expires_at {
+            if expires_at < chrono::Utc::now() {
+                warn!(api_key_id = %row.id, "Expired API key used");
+                return Err(AppError::Unauthorized);
+            }
         }
+
+        Ok(ValidApiKey {
+            api_key_id: row.id.to_string(),
+            tenant_id: row.tenant_id,
+        })
     }
 }
 
