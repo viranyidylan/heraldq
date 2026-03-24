@@ -54,6 +54,16 @@
 
 ## Core Features
 
+## Go-to-Market Minimum
+- [ ] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`
+- [ ] Drive numbers from COUNT queries against graphile tables + `webhook_dlq`
+- [ ] `GET /status.html` — inline HTML page, vanilla fetch()
+- [ ] `GET /dlq` — paginated, newest-first, tenant-scoped, auth protected
+- [ ] Self-serve API key provisioning
+- [ ] HMAC-SHA256 payload signing on outbound webhooks — table stakes, every serious buyer asks
+- [ ] Stripe integration + single-page pricing ($29 / $79 / $199)
+- [ ] One-curl demo that proves value end-to-end: `curl -X POST .../api/v1/webhooks` → delivers to a test URL → visible in `/status`
+
 ### Dead Letter Queue
 - [ x ] Write migration SQL for `webhook_dlq` table
 - [ x ] Write to DLQ each place we permanent-fail
@@ -76,17 +86,6 @@
 - [ ] Basic metrics dashboard (plan mode first to scope it)
 
 ---
-
-## Go-to-Market Minimum
-
-- [ ] One-curl demo that proves value end-to-end: `curl -X POST .../api/v1/webhooks` → delivers to a test URL → visible in `/status`
-- [ ] Self-serve API key provisioning (or a manual flow under 2 minutes)
-- [ ] HMAC-SHA256 payload signing on outbound webhooks — table stakes, every serious buyer asks
-- [ ] Stripe integration + single-page pricing ($29 / $79 / $199)
-
----
-
-## Deploy + Validate
 
 ### Railway Deploy
 - [ ] Verify `railway.toml` service split (api + worker) builds cleanly
