@@ -82,7 +82,7 @@ Add `debug!` and `trace!` calls at the points you care about — payload content
 - `debug!` — the stuff you're asking about now: payloads, intermediate state
 - `trace!` — really noisy stuff like raw HTTP bodies, loop iterations
 
-Run with the right filter — `RUST_LOG=sliq_graphile::webhook=debug` and you see exactly that module's debug output without noise from hyper/tokio/sqlx.
+Run with the right filter — `RUST_LOG=sliq=trace,api=trace,worker=debug` and you see exactly that module's debug output without noise from hyper/tokio/sqlx.
 
 Structured fields are your friend — you're already doing 
 ```rust

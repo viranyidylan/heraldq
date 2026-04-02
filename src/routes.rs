@@ -8,7 +8,7 @@ use rand::RngExt;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres};
 
 use tracing::{debug, info};
 
@@ -41,7 +41,7 @@ pub fn build(state: AppState) -> Router {
         .route("/signup", post(signup))
         .route("/mock", post(mock))
         .route("/dlq", get(dlq))
-        .route("/status", get(status))
+        .route("/status", get(jobs_queued_today))
         .with_state(state)
 }
 
@@ -119,16 +119,30 @@ async fn signup(
     ))
 }
 
-async fn status(
+async fn jobs_queued_today(
     State(state): State<AppState>,
-    api_key: auth::ValidApiKey,
-) -> Result<Json<StatusResponse>, AppError> {
-    Ok(Json(StatusResponse {
-        abandoned: 5,
-        delivered: 3,
-        received: 1,
-    }))
+    // api_key: auth::ValidApiKey,
+) -> Result<Json<i64>, AppError> {
+    let count = sqlx::query_scalar::<Postgres, Option<i64>>(
+        "SELECT COUNT(*) FROM graphile_worker.jobs WHERE created_at >= CURRENT_DATE",
+    )
+    .fetch_one(&state.pg_pool)
+    .await?
+    .unwrap_or(0);
+
+    Ok(Json(count))
 }
+
+// async fn status_for_tenant(
+//     State(state): State<AppState>,
+//     api_key: auth::ValidApiKey,
+// ) -> Result<Json<StatusResponse>, AppError> {
+//     Ok(Json(StatusResponse {
+//         abandoned_today: 5,
+//         delivered_today: 3,
+//         received_today: 6,
+//     }))
+// }
 
 async fn dlq() {
     todo!()
