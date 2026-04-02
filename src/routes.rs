@@ -1,6 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{self, FromRef, State},
+    extract::{self, FromRef, Query, State},
     routing::{get, post},
 };
 use chrono::{Duration, Utc};
@@ -26,13 +26,6 @@ struct HealthCheckResponse {
     message: String,
 }
 
-#[derive(Deserialize, Serialize)]
-struct StatusResponse {
-    received: i32,
-    delivered: i32,
-    abandoned: i32,
-}
-
 pub fn build(state: AppState) -> Router {
     Router::new()
         .route("/ping", get(ping))
@@ -41,7 +34,8 @@ pub fn build(state: AppState) -> Router {
         .route("/signup", post(signup))
         .route("/mock", post(mock))
         .route("/dlq", get(dlq))
-        .route("/status", get(jobs_queued_today))
+        .route("/queued", get(jobs_queued_today))
+        .route("/status", get(status_for_tenant))
         .with_state(state)
 }
 
@@ -133,19 +127,102 @@ async fn jobs_queued_today(
     Ok(Json(count))
 }
 
-// async fn status_for_tenant(
-//     State(state): State<AppState>,
-//     api_key: auth::ValidApiKey,
-// ) -> Result<Json<StatusResponse>, AppError> {
-//     Ok(Json(StatusResponse {
-//         abandoned_today: 5,
-//         delivered_today: 3,
-//         received_today: 6,
-//     }))
-// }
+#[derive(Deserialize, Serialize)]
+struct StatusResponse {
+    queued_today: i64,
+    delivered_today: i64,
+    failed_today: i64,
+    dlq_total: i64,
+    downtime: Option<i64>,
+}
+async fn status_for_tenant(
+    State(state): State<AppState>,
+    _api_key: auth::ValidApiKey,
+) -> Result<Json<StatusResponse>, AppError> {
+    let queued_today = sqlx::query_scalar::<Postgres, Option<i64>>(
+        // Graphile deletes successful jobs, right? Think about how that's going to impact metrics
+        "SELECT COUNT(*) FROM graphile_worker.jobs WHERE created_at >= CURRENT_DATE", 
+    )
+    .fetch_one(&state.pg_pool)
+    .await?
+    .unwrap_or(0);
 
-async fn dlq() {
-    todo!()
+    let delivered_today = sqlx::query_scalar::<Postgres, Option<i64>>(
+        "SELECT COUNT(*) FROM webhook_deliveries WHERE delivered_at >= CURRENT_DATE",
+    )
+    .fetch_one(&state.pg_pool)
+    .await?
+    .unwrap_or(0);
+
+    let failed_today = sqlx::query_scalar::<Postgres, Option<i64>>(
+        "SELECT COUNT(*) FROM dead_letter_queue WHERE abandoned_at >= CURRENT_DATE",
+    )
+    .fetch_one(&state.pg_pool)
+    .await?
+    .unwrap_or(0);
+
+    let dlq_total = sqlx::query_scalar::<Postgres, Option<i64>>(
+        "SELECT COUNT(*) FROM dead_letter_queue",
+    )
+    .fetch_one(&state.pg_pool)
+    .await?
+    .unwrap_or(0);
+
+    Ok(Json(StatusResponse {
+        queued_today,
+        delivered_today,
+        failed_today,
+        dlq_total,
+        downtime: None
+    }))
+}
+
+#[derive(Deserialize, Serialize)]
+struct DeadLetterResponse {
+    messages: Vec<WebhookRequest>,
+    dlq_total: i64,
+    limit: i64,
+    offset: i64,
+}
+
+#[derive(Deserialize)]
+struct DlqPagination {
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+fn clamp_pagination(value: Option<i64>, default: i64, max: i64) -> i64 {
+    value.unwrap_or(default).clamp(0, max)
+}
+async fn dlq(
+    State(state): State<AppState>,
+    _api_key: auth::ValidApiKey,
+    Query(pagination): Query<DlqPagination>,
+) -> Result<Json<DeadLetterResponse>, AppError> {
+    let limit = clamp_pagination(pagination.limit, 25, 100);
+    let offset = clamp_pagination(pagination.offset, 0, i64::MAX);
+
+    let messages: Vec<WebhookRequest> = sqlx::query_as(
+        "SELECT destination, payload FROM dead_letter_queue ORDER BY abandoned_at DESC, id DESC LIMIT $1 OFFSET $2"
+    )
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&state.pg_pool)
+    .await?;
+
+    let dlq_total = sqlx::query_scalar::<Postgres, Option<i64>>(
+        "SELECT COUNT(*) FROM dead_letter_queue",
+    )
+    .fetch_one(&state.pg_pool)
+    .await?
+    .unwrap_or(0);
+
+    Ok(Json(DeadLetterResponse {
+        messages,
+        dlq_total,
+        limit,
+        offset,
+    }))
 }
 
 async fn mock(State(_state): State<AppState>) -> StatusCode {

@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::types::Uuid;
+use sqlx::{prelude::FromRow, types::Uuid};
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, FromRow)]
 pub struct WebhookRequest {
     pub destination: String,
     pub payload: Value,
