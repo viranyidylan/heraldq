@@ -3,8 +3,6 @@ use sliq::{SendWebhook, WorkerState, config::AppConfig, db};
 use std::time::Duration;
 use tracing::info;
 
-
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();

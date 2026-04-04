@@ -35,7 +35,7 @@ pub fn build(state: AppState) -> Router {
         .route("/mock", post(mock))
         .route("/dlq", get(dlq))
         .route("/queued", get(jobs_queued_today))
-        .route("/status", get(status_for_tenant))
+        .route("/summary", get(webhook_activity_summary))
         .with_state(state)
 }
 
@@ -128,19 +128,19 @@ async fn jobs_queued_today(
 }
 
 #[derive(Deserialize, Serialize)]
-struct StatusResponse {
-    queued_today: i64,
+struct WebhookActivitySummary {
+    received_today: i64,
+    queued: i64,
     delivered_today: i64,
     failed_today: i64,
     dlq_total: i64,
     downtime: Option<i64>,
 }
-async fn status_for_tenant(
+async fn webhook_activity_summary(
     State(state): State<AppState>,
     _api_key: auth::ValidApiKey,
-) -> Result<Json<StatusResponse>, AppError> {
-    let queued_today = sqlx::query_scalar::<Postgres, Option<i64>>(
-        // Graphile deletes successful jobs, right? Think about how that's going to impact metrics
+) -> Result<Json<WebhookActivitySummary>, AppError> {
+    let queued = sqlx::query_scalar::<Postgres, Option<i64>>(
         "SELECT COUNT(*) FROM graphile_worker.jobs WHERE created_at >= CURRENT_DATE", 
     )
     .fetch_one(&state.pg_pool)
@@ -168,8 +168,9 @@ async fn status_for_tenant(
     .await?
     .unwrap_or(0);
 
-    Ok(Json(StatusResponse {
-        queued_today,
+    Ok(Json(WebhookActivitySummary {
+        received_today: delivered_today + failed_today + queued,
+        queued,
         delivered_today,
         failed_today,
         dlq_total,

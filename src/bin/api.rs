@@ -19,6 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState {
         pg_pool,
         worker_utils: utils,
+        schema: config.schema,
     };
 
     let app = routes::build(state);

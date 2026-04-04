@@ -14,6 +14,7 @@ pub use webhook::{SendWebhook, WebhookRequest};
 pub struct AppState {
     pub pg_pool: PgPool,
     pub worker_utils: WorkerUtils,
+    pub schema: String,
 }
 
 #[derive(Clone, Debug)]
