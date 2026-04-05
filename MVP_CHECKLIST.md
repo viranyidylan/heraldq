@@ -17,31 +17,6 @@
 
 ---
 
-## Up Next — Type System + Security Hardening
-
-### Strong ID types — stop storing typed IDs as String
-- [ ] `SendWebhook.id` → `ulid::Ulid` (not `String`)
-- [ ] `ValidApiKey.api_key_id` → `Uuid` (not `String`)
-- [ ] Follow the compiler errors — every serialization/deserialization boundary that touches these fields needs updating
-- [ ] Wire `Ulid` serde support through job queue payload
-
-### SSRF hardening — ValidatedUrl newtype (parse, don't validate)
-- [ ] Add `url` crate to Cargo.toml
-- [ ] Create `src/webhook/destination.rs` with `ValidatedUrl` newtype (private inner field)
-- [ ] `ValidatedUrl::parse()`: enforce scheme (https only, http+https in dev), reject private IPs, loopback, link-local 169.254.0.0/16, metadata hostnames
-- [ ] Implement `Deserialize` for `ValidatedUrl` — validation fires at deserialization, invalid destinations never reach handlers
-- [ ] Change `WebhookRequest.destination` and `SendWebhook.destination` to `ValidatedUrl`
-- [ ] Create `DestinationError` enum, wire into `AppError` as 400 (not 500)
-- [ ] Tests: private IPs rejected, loopback rejected, metadata endpoint rejected, valid HTTPS passes, bare IPs rejected
-
-### SendWebhook type split — separate domain/job/dispatch concerns
-- [ ] Extract a dispatch-only struct (e.g. `DispatchRequest { destination, payload, idempotency_key }`) for `dispatch_http`
-- [ ] Keep `SendWebhook` as the job queue payload type with `TaskHandler` impl
-- [ ] `run()` constructs the dispatch struct from `SendWebhook` fields
-- [ ] DB persistence functions take only the fields they need
-
----
-
 ## Project Structure Refactor
 
 - [ x ] config.rs
@@ -52,27 +27,52 @@
 
 ---
 
+### Dead Letter Queue
+- [ x ] Write migration SQL for `webhook_dlq` table
+- [ x ] Write to DLQ each place we permanent-fail
+- [ x ] `GET /dlq` — paginated, newest-first, tenant-scoped, auth protected
+
 ## Core Features
 
 ## Go-to-Market Minimum
 - [ x ] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`
 - [ x ] Drive numbers from COUNT queries against graphile tables + `webhook_dlq`
-- [ ] `GET /status.html` — inline HTML page, vanilla fetch()
 - [ x ] `GET /dlq` — paginated, newest-first, tenant-scoped, auth protected
 - [ x ] Self-serve API key provisioning
+- [ ] `GET /summary.html` — inline HTML page, vanilla fetch()
 - [ ] HMAC-SHA256 payload signing on outbound webhooks — table stakes, every serious buyer asks
 - [ ] Stripe integration + single-page pricing ($29 / $79 / $199)
 - [ ] One-curl demo that proves value end-to-end: `curl -X POST .../api/v1/webhooks` → delivers to a test URL → visible in `/status`
 
-### Dead Letter Queue
-- [ x ] Write migration SQL for `webhook_dlq` table
-- [ x ] Write to DLQ each place we permanent-fail
-- [ ] `GET /dlq` — paginated, newest-first, tenant-scoped, auth protected
+## Up Next — Type System + Security Hardening
+
+### SSRF hardening — ValidatedUrl newtype (parse, don't validate)
+- [ ] Add `url` crate to Cargo.toml
+- [ ] Create `src/webhook/destination.rs` with `ValidatedUrl` newtype (private inner field)
+- [ ] `ValidatedUrl::parse()`: enforce scheme (https only, http+https in dev), reject private IPs, loopback, link-local 169.254.0.0/16, metadata hostnames
+- [ ] Implement `Deserialize` for `ValidatedUrl` — validation fires at deserialization, invalid destinations never reach handlers
+- [ ] Change `WebhookRequest.destination` and `SendWebhook.destination` to `ValidatedUrl`
+- [ ] Create `DestinationError` enum, wire into `AppError` as 400 (not 500)
+- [ ] Tests: private IPs rejected, loopback rejected, metadata endpoint rejected, valid HTTPS passes, bare IPs rejected
+
+### Strong ID types — stop storing typed IDs as String
+- [ ] `SendWebhook.id` → `ulid::Ulid` (not `String`)
+- [ ] `ValidApiKey.api_key_id` → `Uuid` (not `String`)
+- [ ] Follow the compiler errors — every serialization/deserialization boundary that touches these fields needs updating
+- [ ] Wire `Ulid` serde support through job queue payload
+
+### SendWebhook type split — separate domain/job/dispatch concerns
+- [ ] Extract a dispatch-only struct (e.g. `DispatchRequest { destination, payload, idempotency_key }`) for `dispatch_http`
+- [ ] Keep `SendWebhook` as the job queue payload type with `TaskHandler` impl
+- [ ] `run()` constructs the dispatch struct from `SendWebhook` fields
+- [ ] DB persistence functions take only the fields they need
+
+---
 
 ### Structured Logging
-- [ ] Add `tracing` + `tracing-subscriber` with JSON formatter + `EnvFilter`
-- [ ] Log: job enqueued, dispatch attempt, success, failure with error context
-- [ ] Initialize in both `main()` functions
+- [ x ] Add `tracing` + `tracing-subscriber` with JSON formatter + `EnvFilter`
+- [ x ] Log: job enqueued, dispatch attempt, success, failure with error context
+- [ x ] Initialize in both `main()` functions
 
 ### Rate Limiting
 - [ ] Wire `tower_governor` to `POST /webhook`
@@ -80,8 +80,8 @@
 - [ ] Per-key rate limits
 
 ### Status + Observability
-- [ ] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`
-- [ ] Drive numbers from COUNT queries against graphile tables + `webhook_dlq`
+- [ x ] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`
+- [ x ] Drive numbers from COUNT queries against graphile tables + `webhook_dlq`
 - [ ] `GET /status.html` — inline HTML page, vanilla fetch()
 - [ ] Basic metrics dashboard (plan mode first to scope it)
 

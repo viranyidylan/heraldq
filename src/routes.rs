@@ -7,8 +7,7 @@ use chrono::{Duration, Utc};
 use rand::RngExt;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use sqlx::{PgPool, Postgres};
+use sqlx::PgPool;
 
 use tracing::{debug, info};
 
@@ -80,33 +79,21 @@ async fn signup(
     State(state): State<AppState>,
     extract::Json(body): extract::Json<SignupRequest>,
 ) -> Result<(StatusCode, Json<SignupResponse>), AppError> {
-    let tenant = sqlx::query!(
-        "INSERT INTO tenants (name, tier) VALUES ($1, 'free') RETURNING id",
-        body.name,
-    )
-    .fetch_one(&state.pg_pool)
-    .await?;
+    let tenant_id = crate::db::tenants::create_tenant(&state.pg_pool, &body.name).await?;
 
     let raw_key = auth::generate_api_key();
-    let key_hash = hex::encode(Sha256::digest(raw_key.as_bytes()));
+    let key_hash = auth::hash_api_key(&raw_key);
     let expires_at = Utc::now() + Duration::days(TRIAL_DURATION_DAYS);
 
-    sqlx::query!(
-        "INSERT INTO api_keys (tenant_id, key_hash, name, expires_at) VALUES ($1, $2, $3, $4)",
-        tenant.id,
-        key_hash,
-        "trial",
-        expires_at,
-    )
-    .execute(&state.pg_pool)
-    .await?;
+    crate::db::tenants::create_api_key(&state.pg_pool, tenant_id, &key_hash, "trial", expires_at)
+        .await?;
 
-    info!(tenant_id = %tenant.id, "New trial tenant signed up");
+    info!(tenant_id = %tenant_id, "New trial tenant signed up");
 
     Ok((
         StatusCode::CREATED,
         Json(SignupResponse {
-            tenant_id: tenant.id,
+            tenant_id,
             api_key: raw_key,
             expires_at,
         }),
@@ -117,13 +104,7 @@ async fn jobs_queued_today(
     State(state): State<AppState>,
     // api_key: auth::ValidApiKey,
 ) -> Result<Json<i64>, AppError> {
-    let count = sqlx::query_scalar::<Postgres, Option<i64>>(
-        "SELECT COUNT(*) FROM graphile_worker.jobs WHERE created_at >= CURRENT_DATE",
-    )
-    .fetch_one(&state.pg_pool)
-    .await?
-    .unwrap_or(0);
-
+    let count = crate::db::stats::count_jobs_queued_today(&state.pg_pool).await?;
     Ok(Json(count))
 }
 
@@ -136,45 +117,20 @@ struct WebhookActivitySummary {
     dlq_total: i64,
     downtime: Option<i64>,
 }
+
 async fn webhook_activity_summary(
     State(state): State<AppState>,
     _api_key: auth::ValidApiKey,
 ) -> Result<Json<WebhookActivitySummary>, AppError> {
-    let queued = sqlx::query_scalar::<Postgres, Option<i64>>(
-        "SELECT COUNT(*) FROM graphile_worker.jobs WHERE created_at >= CURRENT_DATE", 
-    )
-    .fetch_one(&state.pg_pool)
-    .await?
-    .unwrap_or(0);
-
-    let delivered_today = sqlx::query_scalar::<Postgres, Option<i64>>(
-        "SELECT COUNT(*) FROM webhook_deliveries WHERE delivered_at >= CURRENT_DATE",
-    )
-    .fetch_one(&state.pg_pool)
-    .await?
-    .unwrap_or(0);
-
-    let failed_today = sqlx::query_scalar::<Postgres, Option<i64>>(
-        "SELECT COUNT(*) FROM dead_letter_queue WHERE abandoned_at >= CURRENT_DATE",
-    )
-    .fetch_one(&state.pg_pool)
-    .await?
-    .unwrap_or(0);
-
-    let dlq_total = sqlx::query_scalar::<Postgres, Option<i64>>(
-        "SELECT COUNT(*) FROM dead_letter_queue",
-    )
-    .fetch_one(&state.pg_pool)
-    .await?
-    .unwrap_or(0);
+    let counts = crate::db::stats::webhook_activity_summary(&state.pg_pool).await?;
 
     Ok(Json(WebhookActivitySummary {
-        received_today: delivered_today + failed_today + queued,
-        queued,
-        delivered_today,
-        failed_today,
-        dlq_total,
-        downtime: None
+        received_today: counts.delivered_today + counts.failed_today + counts.queued,
+        queued: counts.queued,
+        delivered_today: counts.delivered_today,
+        failed_today: counts.failed_today,
+        dlq_total: counts.dlq_total,
+        downtime: None,
     }))
 }
 
@@ -195,6 +151,7 @@ struct DlqPagination {
 fn clamp_pagination(value: Option<i64>, default: i64, max: i64) -> i64 {
     value.unwrap_or(default).clamp(0, max)
 }
+
 async fn dlq(
     State(state): State<AppState>,
     _api_key: auth::ValidApiKey,
@@ -203,20 +160,8 @@ async fn dlq(
     let limit = clamp_pagination(pagination.limit, 25, 100);
     let offset = clamp_pagination(pagination.offset, 0, i64::MAX);
 
-    let messages: Vec<WebhookRequest> = sqlx::query_as(
-        "SELECT destination, payload FROM dead_letter_queue ORDER BY abandoned_at DESC, id DESC LIMIT $1 OFFSET $2"
-    )
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(&state.pg_pool)
-    .await?;
-
-    let dlq_total = sqlx::query_scalar::<Postgres, Option<i64>>(
-        "SELECT COUNT(*) FROM dead_letter_queue",
-    )
-    .fetch_one(&state.pg_pool)
-    .await?
-    .unwrap_or(0);
+    let messages = crate::db::dlq::list_page(&state.pg_pool, limit, offset).await?;
+    let dlq_total = crate::db::stats::count_dlq_total(&state.pg_pool).await?;
 
     Ok(Json(DeadLetterResponse {
         messages,

@@ -12,6 +12,11 @@ pub fn generate_api_key() -> String {
     format!("sliq_{}", hex::encode(bytes))
 }
 
+/// SHA-256 hash an API key, returning the hex-encoded digest.
+pub fn hash_api_key(raw_key: &str) -> String {
+    hex::encode(Sha256::digest(raw_key.as_bytes()))
+}
+
 fn extract_bearer_token(headers: &http::HeaderMap) -> Result<String, AppError> {
     let auth_header = headers
         .get(http::header::AUTHORIZATION)
@@ -86,6 +91,13 @@ mod tests {
             http::HeaderValue::from_static("Basic dXNlcjpwYXNz"),
         );
         assert!(matches!(extract_bearer_token(&headers), Err(AppError::Unauthorized)));
+    }
+
+    #[test]
+    fn hash_api_key_is_deterministic_and_correct_length() {
+        let hash = hash_api_key("sliq_test123");
+        assert_eq!(hash.len(), 64); // SHA-256 = 32 bytes = 64 hex chars
+        assert_eq!(hash, hash_api_key("sliq_test123"));
     }
 
     #[test]
