@@ -55,11 +55,11 @@
 ## Core Features
 
 ## Go-to-Market Minimum
-- [ ] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`
-- [ ] Drive numbers from COUNT queries against graphile tables + `webhook_dlq`
+- [ x ] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`
+- [ x ] Drive numbers from COUNT queries against graphile tables + `webhook_dlq`
 - [ ] `GET /status.html` — inline HTML page, vanilla fetch()
-- [ ] `GET /dlq` — paginated, newest-first, tenant-scoped, auth protected
-- [ ] Self-serve API key provisioning
+- [ x ] `GET /dlq` — paginated, newest-first, tenant-scoped, auth protected
+- [ x ] Self-serve API key provisioning
 - [ ] HMAC-SHA256 payload signing on outbound webhooks — table stakes, every serious buyer asks
 - [ ] Stripe integration + single-page pricing ($29 / $79 / $199)
 - [ ] One-curl demo that proves value end-to-end: `curl -X POST .../api/v1/webhooks` → delivers to a test URL → visible in `/status`
