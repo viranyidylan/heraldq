@@ -1,7 +1,5 @@
 # MVP Build Checklist
-
 ## Done
-
 - [x] Fix `try_dispatch_webhook` to handle 4xx (permanent fail) and 5xx (retry) correctly
 - [x] Wire up `permanently_fail_jobs` via `WorkerContext` for 4xx
 - [x] Fix `Ok(())` swallowing non-2xx responses
@@ -14,35 +12,28 @@
 - [x] Axum extractor that looks up hash in `api_keys`
 - [x] 401 on missing/invalid/inactive key
 - [x] Apply extractor to `POST /webhook` only
-
 ---
-
 ## Project Structure Refactor
-
-- [ x ] config.rs
-- [ x ] error.rs
-- [ x ] auth/mod.rs
-- [ x ] webhook/model.rs + webhook/dispatch.rs
-- [ x ] db/mod.rs + db/dlq.rs
-
+- [x] config.rs
+- [x] error.rs
+- [x] auth/mod.rs
+- [x] webhook/model.rs + webhook/dispatch.rs
+- [x] db/mod.rs + db/dlq.rs
 ---
-
 ### Dead Letter Queue
-- [ x ] Write migration SQL for `webhook_dlq` table
-- [ x ] Write to DLQ each place we permanent-fail
-- [ x ] `GET /dlq` — paginated, newest-first, tenant-scoped, auth protected
-
-## Core Features
-
+- [x] Write migration SQL for `webhook_dlq` table
+- [x] Write to DLQ each place we permanent-fail
+- [x] `GET /dlq` — paginated, newest-first, tenant-scoped, auth protected
+--
 ## Go-to-Market Minimum
-- [ x ] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`
-- [ x ] Drive numbers from COUNT queries against graphile tables + `webhook_dlq`
-- [ x ] `GET /dlq` — paginated, newest-first, tenant-scoped, auth protected
-- [ x ] Self-serve API key provisioning
-- [ ] `GET /summary.html` — inline HTML page, vanilla fetch()
-- [ ] HMAC-SHA256 payload signing on outbound webhooks — table stakes, every serious buyer asks
-- [ ] Stripe integration + single-page pricing ($29 / $79 / $199)
-- [ ] One-curl demo that proves value end-to-end: `curl -X POST .../api/v1/webhooks` → delivers to a test URL → visible in `/status`
+- [x] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`
+- [x] Drive numbers from COUNT queries against graphile tables + `webhook_dlq`
+- [x] `GET /dlq` — paginated, newest-first, tenant-scoped, auth protected
+- [x] Self-serve API key provisioning
+- [x] `GET /summary.html` — inline HTML page, vanilla fetch()
+- [] HMAC-SHA256 payload signing on outbound webhooks — table stakes, every serious buyer asks
+- [] Stripe integration + single-page pricing ($29 / $79 / $199)
+- [] One-curl demo that proves value end-to-end: `curl -X POST .../api/v1/webhooks` → delivers to a test URL → visible in `/status`
 
 ## Up Next — Type System + Security Hardening
 

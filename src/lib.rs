@@ -3,6 +3,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod routes;
+pub mod views;
 pub mod webhook;
 
 use graphile_worker::WorkerUtils;

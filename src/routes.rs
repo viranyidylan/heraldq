@@ -1,7 +1,5 @@
 use axum::{
-    Json, Router,
-    extract::{self, FromRef, Query, State},
-    routing::{get, post},
+    Json, Router, extract::{self, FromRef, Query, State}, response::Html, routing::{get, post}
 };
 use chrono::{Duration, Utc};
 use rand::RngExt;
@@ -35,6 +33,7 @@ pub fn build(state: AppState) -> Router {
         .route("/dlq", get(dlq))
         .route("/queued", get(jobs_queued_today))
         .route("/summary", get(webhook_activity_summary))
+        .route("/dashboard", get(dashboard))
         .with_state(state)
 }
 
@@ -118,6 +117,7 @@ struct WebhookActivitySummary {
     downtime: Option<i64>,
 }
 
+// TODO: MASSIVE BUG: returns activity for ALL accounts, not just tenant
 async fn webhook_activity_summary(
     State(state): State<AppState>,
     _api_key: auth::ValidApiKey,
@@ -132,6 +132,14 @@ async fn webhook_activity_summary(
         dlq_total: counts.dlq_total,
         downtime: None,
     }))
+}
+
+async fn dashboard(
+    State(state): State<AppState>,
+    // _api_key: auth::ValidApiKey,
+) -> Result<Html<String>, AppError> {
+    let counts = crate::db::stats::webhook_activity_summary(&state.pg_pool).await?;
+    Ok(Html(crate::views::render_dashboard(&counts)))
 }
 
 #[derive(Deserialize, Serialize)]
@@ -152,6 +160,7 @@ fn clamp_pagination(value: Option<i64>, default: i64, max: i64) -> i64 {
     value.unwrap_or(default).clamp(0, max)
 }
 
+// TODO: MASSIVE BUG: returns dlq for ALL accounts, not just tenant
 async fn dlq(
     State(state): State<AppState>,
     _api_key: auth::ValidApiKey,
