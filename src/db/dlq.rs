@@ -1,7 +1,7 @@
 use graphile_worker::Job;
-use sqlx::{PgPool};
+use sqlx::PgPool;
 
-use crate::SendWebhook;
+use crate::{SendWebhook, WebhookRequest};
 
 pub async fn insert(pool: &PgPool, webhook: SendWebhook, job: Job) -> Result<(), sqlx::Error> {
     let id = webhook.id;
@@ -23,4 +23,20 @@ pub async fn insert(pool: &PgPool, webhook: SendWebhook, job: Job) -> Result<(),
     .await?;
 
     Ok(())
+}
+
+pub async fn list_page(
+    pool: &PgPool,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<WebhookRequest>, sqlx::Error> {
+    let messages = sqlx::query_as(
+        "SELECT destination, payload FROM dead_letter_queue ORDER BY abandoned_at DESC, id DESC LIMIT $1 OFFSET $2",
+    )
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(messages)
 }
