@@ -31,6 +31,7 @@
 - [x] `GET /dlq` — paginated, newest-first, tenant-scoped, auth protected
 - [x] Self-serve API key provisioning
 - [x] `GET /summary.html` — inline HTML page, vanilla fetch()
+- [] FIX THE /status AND /dlq BUG (MAKE IT TENANT-SCOPED)
 - [] HMAC-SHA256 payload signing on outbound webhooks — table stakes, every serious buyer asks
 - [] Stripe integration + single-page pricing ($29 / $79 / $199)
 - [] One-curl demo that proves value end-to-end: `curl -X POST .../api/v1/webhooks` → delivers to a test URL → visible in `/status`
@@ -61,9 +62,9 @@
 ---
 
 ### Structured Logging
-- [ x ] Add `tracing` + `tracing-subscriber` with JSON formatter + `EnvFilter`
-- [ x ] Log: job enqueued, dispatch attempt, success, failure with error context
-- [ x ] Initialize in both `main()` functions
+- [x] Add `tracing` + `tracing-subscriber` with JSON formatter + `EnvFilter`
+- [x] Log: job enqueued, dispatch attempt, success, failure with error context
+- [x] Initialize in both `main()` functions
 
 ### Rate Limiting
 - [ ] Wire `tower_governor` to `POST /webhook`
