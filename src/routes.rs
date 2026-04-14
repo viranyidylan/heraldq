@@ -101,9 +101,10 @@ async fn signup(
 
 async fn jobs_queued_today(
     State(state): State<AppState>,
-    // api_key: auth::ValidApiKey,
+    api_key: auth::ValidApiKey,
 ) -> Result<Json<i64>, AppError> {
-    let count = crate::db::stats::count_jobs_queued_today(&state.pg_pool).await?;
+    let tenant_id = api_key.tenant_id;
+    let count = crate::db::stats::count_jobs_queued_today(&state.pg_pool, &tenant_id).await?;
     Ok(Json(count))
 }
 
@@ -120,9 +121,9 @@ struct WebhookActivitySummary {
 // TODO: MASSIVE BUG: returns activity for ALL accounts, not just tenant
 async fn webhook_activity_summary(
     State(state): State<AppState>,
-    _api_key: auth::ValidApiKey,
+    api_key: auth::ValidApiKey,
 ) -> Result<Json<WebhookActivitySummary>, AppError> {
-    let counts = crate::db::stats::webhook_activity_summary(&state.pg_pool).await?;
+    let counts = crate::db::stats::webhook_activity_summary(&state.pg_pool, &api_key.tenant_id).await?;
 
     Ok(Json(WebhookActivitySummary {
         received_today: counts.delivered_today + counts.failed_today + counts.queued,
@@ -136,9 +137,10 @@ async fn webhook_activity_summary(
 
 async fn dashboard(
     State(state): State<AppState>,
-    // _api_key: auth::ValidApiKey,
+    api_key: auth::ValidApiKey,
 ) -> Result<Html<String>, AppError> {
-    let counts = crate::db::stats::webhook_activity_summary(&state.pg_pool).await?;
+    let counts = crate::db::stats::webhook_activity_summary(&state.pg_pool, &api_key.tenant_id).await?;
+
     Ok(Html(crate::views::render_dashboard(&counts)))
 }
 
@@ -160,17 +162,18 @@ fn clamp_pagination(value: Option<i64>, default: i64, max: i64) -> i64 {
     value.unwrap_or(default).clamp(0, max)
 }
 
-// TODO: MASSIVE BUG: returns dlq for ALL accounts, not just tenant
 async fn dlq(
     State(state): State<AppState>,
-    _api_key: auth::ValidApiKey,
+    api_key: auth::ValidApiKey,
     Query(pagination): Query<DlqPagination>,
 ) -> Result<Json<DeadLetterResponse>, AppError> {
+    let tenant_id = api_key.tenant_id;
+
     let limit = clamp_pagination(pagination.limit, 25, 100);
     let offset = clamp_pagination(pagination.offset, 0, i64::MAX);
 
-    let messages = crate::db::dlq::list_page(&state.pg_pool, limit, offset).await?;
-    let dlq_total = crate::db::stats::count_dlq_total(&state.pg_pool).await?;
+    let messages = crate::db::dlq::list_page(&state.pg_pool, &api_key.tenant_id, limit, offset).await?;
+    let dlq_total = crate::db::dlq::count_dlq_total(&state.pg_pool, &tenant_id).await?;
 
     Ok(Json(DeadLetterResponse {
         messages,

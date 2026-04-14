@@ -9,6 +9,7 @@ pub async fn enqueue(
     tenant_id: Uuid,
     request_body: WebhookRequest
 ) -> Result<(), GraphileWorkerError> {
+    let queue_name = format!("webhooks:{tenant_id}");
     utils
         .add_job(
             SendWebhook {
@@ -17,7 +18,10 @@ pub async fn enqueue(
                 destination: request_body.destination.to_string(),
                 payload: request_body.payload,
             },
-            JobSpecBuilder::new().max_attempts(5).build(),
+            JobSpecBuilder::new()
+                .queue_name(queue_name)
+                .max_attempts(5)
+                .build(),
         )
         .await?;
     Ok(())

@@ -47,8 +47,6 @@ pub enum DispatchError {
     MissingExtension(&'static str),
 }
 
-/// Pure HTTP dispatch — no WorkerContext, no DB, no side effects.
-/// Makes the request, returns what happened.
 async fn dispatch_http(
     http: &Client,
     webhook: &SendWebhook,

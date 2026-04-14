@@ -1,5 +1,6 @@
 use graphile_worker::Job;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres};
+use uuid::Uuid;
 
 use crate::{SendWebhook, WebhookRequest};
 
@@ -25,14 +26,28 @@ pub async fn insert(pool: &PgPool, webhook: SendWebhook, job: Job) -> Result<(),
     Ok(())
 }
 
+pub async fn count_dlq_total(pool: &PgPool, tenant_id: &Uuid) -> Result<i64, sqlx::Error> {
+    let count = sqlx::query_scalar::<Postgres, Option<i64>>(
+        "SELECT COUNT(*) FROM dead_letter_queue WHERE tenant_id = $1",
+    )
+    .bind(tenant_id)
+    .fetch_one(pool)
+    .await?
+    .unwrap_or(0);
+
+    Ok(count)
+}
+
 pub async fn list_page(
     pool: &PgPool,
+    tenant_id: &Uuid,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<WebhookRequest>, sqlx::Error> {
     let messages = sqlx::query_as(
-        "SELECT destination, payload FROM dead_letter_queue ORDER BY abandoned_at DESC, id DESC LIMIT $1 OFFSET $2",
+        "SELECT destination, payload FROM dead_letter_queue WHERE tenant_id = $1 ORDER BY abandoned_at DESC, id DESC LIMIT $2 OFFSET $3",
     )
+    .bind(tenant_id)
     .bind(limit)
     .bind(offset)
     .fetch_all(pool)
