@@ -1,6 +1,6 @@
-use crate::db::stats::ActivityCounts;
+use crate::db::stats::WebhookActivitySummary;
 
-pub fn render_dashboard(counts: &ActivityCounts) -> String {
+pub fn render_dashboard(counts: &WebhookActivitySummary) -> String {
     let received = counts.delivered_today + counts.failed_today + counts.queued;
 
     format!(

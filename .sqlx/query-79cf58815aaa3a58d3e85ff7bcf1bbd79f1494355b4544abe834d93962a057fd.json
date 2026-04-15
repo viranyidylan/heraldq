@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) \"count!\" FROM dead_letter_queue WHERE abandoned_at >= CURRENT_DATE AND tenant_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "79cf58815aaa3a58d3e85ff7bcf1bbd79f1494355b4544abe834d93962a057fd"
+}

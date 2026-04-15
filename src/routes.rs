@@ -1,5 +1,8 @@
 use axum::{
-    Json, Router, extract::{self, FromRef, Query, State}, response::Html, routing::{get, post}
+    Json, Router,
+    extract::{self, FromRef, Query, State},
+    response::Html,
+    routing::{get, post},
 };
 use chrono::{Duration, Utc};
 use rand::RngExt;
@@ -9,7 +12,7 @@ use sqlx::PgPool;
 
 use tracing::{debug, info};
 
-use crate::{AppState, WebhookRequest, auth, error::AppError, webhook};
+use crate::{AppState, WebhookRequest, auth, db::stats::WebhookActivitySummary, error::AppError, queue::TenantQueue, webhook};
 
 impl FromRef<AppState> for PgPool {
     fn from_ref(app_state: &AppState) -> PgPool {
@@ -31,7 +34,6 @@ pub fn build(state: AppState) -> Router {
         .route("/signup", post(signup))
         .route("/mock", post(mock))
         .route("/dlq", get(dlq))
-        .route("/queued", get(jobs_queued_today))
         .route("/summary", get(webhook_activity_summary))
         .route("/dashboard", get(dashboard))
         .with_state(state)
@@ -99,47 +101,30 @@ async fn signup(
     ))
 }
 
-async fn jobs_queued_today(
-    State(state): State<AppState>,
-    api_key: auth::ValidApiKey,
-) -> Result<Json<i64>, AppError> {
-    let tenant_id = api_key.tenant_id;
-    let count = crate::db::stats::count_jobs_queued_today(&state.pg_pool, &tenant_id).await?;
-    Ok(Json(count))
-}
-
-#[derive(Deserialize, Serialize)]
-struct WebhookActivitySummary {
-    received_today: i64,
-    queued: i64,
-    delivered_today: i64,
-    failed_today: i64,
-    dlq_total: i64,
-    downtime: Option<i64>,
-}
-
-// TODO: MASSIVE BUG: returns activity for ALL accounts, not just tenant
 async fn webhook_activity_summary(
     State(state): State<AppState>,
     api_key: auth::ValidApiKey,
 ) -> Result<Json<WebhookActivitySummary>, AppError> {
-    let counts = crate::db::stats::webhook_activity_summary(&state.pg_pool, &api_key.tenant_id).await?;
+    let summary = crate::db::stats::activity_summary(
+        &state.pg_pool,
+        api_key.tenant_id,
+        &TenantQueue::for_tenant(api_key.tenant_id),
+    )
+    .await?;
 
-    Ok(Json(WebhookActivitySummary {
-        received_today: counts.delivered_today + counts.failed_today + counts.queued,
-        queued: counts.queued,
-        delivered_today: counts.delivered_today,
-        failed_today: counts.failed_today,
-        dlq_total: counts.dlq_total,
-        downtime: None,
-    }))
+    Ok(Json(summary))
 }
 
 async fn dashboard(
     State(state): State<AppState>,
     api_key: auth::ValidApiKey,
 ) -> Result<Html<String>, AppError> {
-    let counts = crate::db::stats::webhook_activity_summary(&state.pg_pool, &api_key.tenant_id).await?;
+    let counts = crate::db::stats::activity_summary(
+        &state.pg_pool,
+        api_key.tenant_id,
+        &TenantQueue::for_tenant(api_key.tenant_id),
+    )
+    .await?;
 
     Ok(Html(crate::views::render_dashboard(&counts)))
 }
@@ -172,8 +157,9 @@ async fn dlq(
     let limit = clamp_pagination(pagination.limit, 25, 100);
     let offset = clamp_pagination(pagination.offset, 0, i64::MAX);
 
-    let messages = crate::db::dlq::list_page(&state.pg_pool, &api_key.tenant_id, limit, offset).await?;
-    let dlq_total = crate::db::dlq::count_dlq_total(&state.pg_pool, &tenant_id).await?;
+    let messages =
+        crate::db::dlq::list_page(&state.pg_pool, &api_key.tenant_id, limit, offset).await?;
+    let dlq_total = crate::db::dlq::count_dlq_total(&state.pg_pool, tenant_id).await?;
 
     Ok(Json(DeadLetterResponse {
         messages,

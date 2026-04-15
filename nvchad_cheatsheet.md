@@ -5,6 +5,7 @@ chad-cheats:
 
 space + h + t : change theme 
 
+:noh : clears search highlight
 
 :TSInstall <language>(elixir) : add syntax highlighting support 
 :TSInstallInfo : see what syntax highlighting are already installed

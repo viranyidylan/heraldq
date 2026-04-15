@@ -1,5 +1,5 @@
 use graphile_worker::Job;
-use sqlx::{PgPool, Postgres};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{SendWebhook, WebhookRequest};
@@ -26,14 +26,13 @@ pub async fn insert(pool: &PgPool, webhook: SendWebhook, job: Job) -> Result<(),
     Ok(())
 }
 
-pub async fn count_dlq_total(pool: &PgPool, tenant_id: &Uuid) -> Result<i64, sqlx::Error> {
-    let count = sqlx::query_scalar::<Postgres, Option<i64>>(
-        "SELECT COUNT(*) FROM dead_letter_queue WHERE tenant_id = $1",
+pub async fn count_dlq_total(pool: &PgPool, tenant_id: Uuid) -> Result<i64, sqlx::Error> {
+    let count = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) "count!" FROM dead_letter_queue WHERE tenant_id = $1"#,
+        tenant_id,
     )
-    .bind(tenant_id)
     .fetch_one(pool)
-    .await?
-    .unwrap_or(0);
+    .await?;
 
     Ok(count)
 }
