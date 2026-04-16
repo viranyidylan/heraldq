@@ -31,9 +31,12 @@
 - [x] `GET /dlq` — paginated, newest-first, tenant-scoped, auth protected
 - [x] Self-serve API key provisioning
 - [x] `GET /summary.html` — inline HTML page, vanilla fetch()
-- [] FIX THE /status AND /dlq BUG (MAKE IT TENANT-SCOPED)
-- [] HMAC-SHA256 payload signing on outbound webhooks — table stakes, every serious buyer asks
-- [] Stripe integration + single-page pricing ($29 / $79 / $199)
+- [x] FIX THE /status AND /dlq BUG (MAKE IT TENANT-SCOPED)
+- [] HMAC-SHA256 payload signing on outbound webhooks — table stakes, every serious buyer asks:
+    - [] How are secrets generated? Where do they live?
+    - [] Signature header format and structure?
+- [] SSRF hardening - ValidatedUrl newtype (parse, don't validate)
+- [] Stripe integration / payment link ($29 / $79 / $199)
 - [] One-curl demo that proves value end-to-end: `curl -X POST .../api/v1/webhooks` → delivers to a test URL → visible in `/status`
 
 ## Up Next — Type System + Security Hardening
@@ -46,6 +49,10 @@
 - [ ] Change `WebhookRequest.destination` and `SendWebhook.destination` to `ValidatedUrl`
 - [ ] Create `DestinationError` enum, wire into `AppError` as 400 (not 500)
 - [ ] Tests: private IPs rejected, loopback rejected, metadata endpoint rejected, valid HTTPS passes, bare IPs rejected
+
+### Payload types
+- [] Payload hardening - Decide what you want to allow and disallow in the payload
+- [] And how you might use the Rust type system with this payload 
 
 ### Strong ID types — stop storing typed IDs as String
 - [ ] `SendWebhook.id` → `ulid::Ulid` (not `String`)

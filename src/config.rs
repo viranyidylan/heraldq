@@ -5,6 +5,7 @@ pub struct AppConfig {
     pub database_url: String,
     pub schema: String,
     pub port: u16,
+    pub webhook_signing_secret: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -37,7 +38,10 @@ impl AppConfig {
             .parse::<u16>()
             .map_err(|_| ConfigError::MissingVar("PORT (invalid u16)".into()))?;
 
-        Ok(AppConfig { database_url, schema, port })
+        let webhook_signing_secret = std::env::var("WEBHOOK_SIGNING_SECRET")
+            .map_err(|_| ConfigError::MissingVar("WEBHOOK_SIGNING_SECRET".into()))?;
+
+        Ok(AppConfig { database_url, schema, port, webhook_signing_secret })
     }
 }
 
@@ -63,6 +67,7 @@ mod tests {
                 Some(v) => std::env::set_var("PORT", v),
                 None => std::env::remove_var("PORT"),
             }
+            std::env::set_var("WEBHOOK_SIGNING_SECRET", "test-secret");
         }
     }
 

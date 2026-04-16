@@ -20,6 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_state = WorkerState {
         http_client: reqwest::Client::new(),
         pg_pool: pg_pool.clone(),
+        signing_secret: std::sync::Arc::new(config.webhook_signing_secret.clone()),
     };
 
     info!("Database connection established");

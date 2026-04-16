@@ -1,13 +1,17 @@
+use chrono::Utc;
 use graphile_worker::errors::GraphileWorkerError;
 use graphile_worker::{IntoTaskHandlerResult, TaskHandler, WorkerContext, WorkerContextExt};
+use hmac::{Hmac, Mac};
 use reqwest::Client;
+use sha2::Sha256;
 use std::time::Duration;
-
 use tracing::{error, info, warn};
 
 use crate::{WorkerState, db};
 
 use super::SendWebhook;
+
+type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, PartialEq)]
 enum StatusAction {
@@ -50,12 +54,15 @@ pub enum DispatchError {
 async fn dispatch_http(
     http: &Client,
     webhook: &SendWebhook,
+    body: Vec<u8>,
+    signature_header: String,
 ) -> Result<StatusAction, DispatchError> {
     let response = http
         .post(&webhook.destination)
         .header("Content-Type", "application/json")
         .header("Idempotency-Key", &webhook.id)
-        .json(&webhook.payload)
+        .header("Sliq-Signature", signature_header)
+        .body(body)
         .timeout(Duration::from_secs(30))
         .send()
         .await?;
@@ -69,8 +76,7 @@ impl TaskHandler for SendWebhook {
     async fn run(self, ctx: WorkerContext) -> impl IntoTaskHandlerResult {
         let app_state = ctx
             .get_ext::<WorkerState>()
-            .ok_or(DispatchError::MissingExtension("Worker State"))
-            ?;
+            .ok_or(DispatchError::MissingExtension("Worker State"))?;
 
         let http_client = &app_state.http_client;
         let pg_pool = &app_state.pg_pool;
@@ -89,7 +95,12 @@ impl TaskHandler for SendWebhook {
             "Dispatching webhook"
         );
 
-        let result = dispatch_http(http_client, &self).await;
+        let timestamp_utc = Utc::now().timestamp().to_string();
+        let body = serde_json::to_vec(&self.payload)
+            .expect("payload serialization should not fail");
+        let hex_sig = sign_bytes(app_state.signing_secret.as_bytes(), &timestamp_utc, &body);
+        let signature_header = format!("t={},v1={}", timestamp_utc, hex_sig);
+        let result = dispatch_http(http_client, &self, body, signature_header).await;
 
         let res = match result {
             Ok(StatusAction::Success) => {
@@ -116,27 +127,39 @@ impl TaskHandler for SendWebhook {
         };
 
         if let Err(ref e) = res
-            && attempts >= max_attempts {
-                let _ = db::dlq::insert(pg_pool, self.clone(), job.clone()).await;
-                error!(
-                    job_id = %job_id,
-                    destination = %self.destination,
-                    attempt = attempts,
-                    max_attempts,
-                    error = %e,
-                    "Final attempt exhausted, job moved to DLQ"
-                );
+            && attempts >= max_attempts
+        {
+            let _ = db::dlq::insert(pg_pool, self.clone(), job.clone()).await;
+            error!(
+                job_id = %job_id,
+                destination = %self.destination,
+                attempt = attempts,
+                max_attempts,
+                error = %e,
+                "Final attempt exhausted, job moved to DLQ"
+            );
         }
         res
     }
+}
+
+pub fn sign_bytes(secret: &[u8], timestamp_utc: &str, body: &[u8]) -> String {
+    let mut mac = HmacSha256::new_from_slice(secret)
+        .expect("HMAC can take key of any size");
+    mac.update(timestamp_utc.as_bytes());
+    mac.update(b".");
+    mac.update(body);
+    hex::encode(mac.finalize().into_bytes())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use wiremock::matchers::{header, method};
     use wiremock::{Mock, MockServer, ResponseTemplate};
-    use wiremock::matchers::{method, header};
+
+    const KEY: &[u8] = b"SECRET_KEY";
 
     fn test_webhook(destination: &str) -> SendWebhook {
         SendWebhook {
@@ -145,6 +168,13 @@ mod tests {
             destination: destination.to_string(),
             payload: json!({"event": "test"}),
         }
+    }
+
+    fn sign_for_test(webhook: &SendWebhook) -> (Vec<u8>, String) {
+        let ts = Utc::now().timestamp().to_string();
+        let body = serde_json::to_vec(&webhook.payload).unwrap();
+        let hex_sig = sign_bytes(KEY, &ts, &body);
+        (body, format!("t={},v1={}", ts, hex_sig))
     }
 
     #[tokio::test]
@@ -156,7 +186,10 @@ mod tests {
             .await;
 
         let webhook = test_webhook(&server.uri());
-        let result = dispatch_http(&Client::new(), &webhook).await.unwrap();
+        let (body, sig) = sign_for_test(&webhook);
+        let result = dispatch_http(&Client::new(), &webhook, body, sig)
+            .await
+            .unwrap();
         assert_eq!(result, StatusAction::Success);
     }
 
@@ -169,8 +202,14 @@ mod tests {
             .await;
 
         let webhook = test_webhook(&server.uri());
-        let result = dispatch_http(&Client::new(), &webhook).await.unwrap();
-        assert_eq!(result, StatusAction::Retry(reqwest::StatusCode::SERVICE_UNAVAILABLE));
+        let (body, sig) = sign_for_test(&webhook);
+        let result = dispatch_http(&Client::new(), &webhook, body, sig)
+            .await
+            .unwrap();
+        assert_eq!(
+            result,
+            StatusAction::Retry(reqwest::StatusCode::SERVICE_UNAVAILABLE)
+        );
     }
 
     #[tokio::test]
@@ -182,14 +221,22 @@ mod tests {
             .await;
 
         let webhook = test_webhook(&server.uri());
-        let result = dispatch_http(&Client::new(), &webhook).await.unwrap();
-        assert_eq!(result, StatusAction::PermanentFail(reqwest::StatusCode::NOT_FOUND));
+        let (body, sig) = sign_for_test(&webhook);
+        let result = dispatch_http(&Client::new(), &webhook, body, sig)
+            .await
+            .unwrap();
+        assert_eq!(
+            result,
+            StatusAction::PermanentFail(reqwest::StatusCode::NOT_FOUND)
+        );
     }
 
     #[tokio::test]
     async fn dispatch_returns_network_error_on_connection_refused() {
         let webhook = test_webhook("http://127.0.0.1:1"); // nothing listening
-        let result = dispatch_http(&Client::new(), &webhook).await;
+
+        let (body, sig) = sign_for_test(&webhook);
+        let result = dispatch_http(&Client::new(), &webhook, body, sig).await;
         assert!(matches!(result, Err(DispatchError::Network(_))));
     }
 
@@ -204,7 +251,10 @@ mod tests {
             .await;
 
         let webhook = test_webhook(&server.uri());
-        dispatch_http(&Client::new(), &webhook).await.unwrap();
+        let (body, sig) = sign_for_test(&webhook);
+        dispatch_http(&Client::new(), &webhook, body, sig)
+            .await
+            .unwrap();
 
         // wiremock will fail the test if the headers don't match —
         // unmatched requests cause a panic on MockServer drop
