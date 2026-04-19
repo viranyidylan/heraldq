@@ -27,15 +27,18 @@ struct HealthCheckResponse {
 }
 
 pub fn build(state: AppState) -> Router {
-    Router::new()
-        .route("/ping", get(ping))
-        .route("/health", get(health))
+    let v1 = Router::new()
         .route("/webhook", post(add_job))
         .route("/signup", post(signup))
         .route("/mock", post(mock))
         .route("/dlq", get(dlq))
         .route("/summary", get(webhook_activity_summary))
-        .route("/dashboard", get(dashboard))
+        .route("/dashboard", get(dashboard));
+
+    Router::new()
+        .route("/ping", get(ping))
+        .route("/health", get(health))
+        .nest("/v1", v1)
         .with_state(state)
 }
 
