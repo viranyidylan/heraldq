@@ -32,9 +32,9 @@
 - [x] Self-serve API key provisioning
 - [x] `GET /summary.html` — inline HTML page, vanilla fetch()
 - [x] FIX THE /status AND /dlq BUG (MAKE IT TENANT-SCOPED)
-- [] HMAC-SHA256 payload signing on outbound webhooks — table stakes, every serious buyer asks:
+- [o] HMAC-SHA256 payload signing on outbound webhooks — table stakes, every serious buyer asks:
     - [] How are secrets generated? Where do they live?
-    - [] Signature header format and structure?
+    - [x] Signature header format and structure?
 - [] SSRF hardening - ValidatedUrl newtype (parse, don't validate)
 - [] Stripe integration / payment link ($29 / $79 / $199)
 - [] One-curl demo that proves value end-to-end: `curl -X POST .../api/v1/webhooks` → delivers to a test URL → visible in `/status`
@@ -79,16 +79,16 @@
 - [ ] Per-key rate limits
 
 ### Status + Observability
-- [ x ] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`
-- [ x ] Drive numbers from COUNT queries against graphile tables + `webhook_dlq`
-- [ ] `GET /status.html` — inline HTML page, vanilla fetch()
+- [x] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`
+- [x] Drive numbers from COUNT queries against graphile tables + `webhook_dlq`
+- [x] `GET /status.html` — inline HTML page, vanilla fetch()
 - [ ] Basic metrics dashboard (plan mode first to scope it)
 
 ---
 
 ### Railway Deploy
-- [ ] Verify `railway.toml` service split (api + worker) builds cleanly
-- [ ] Confirm both Dockerfiles build for `--release`
+- [x] Verify `railway.toml` service split (api + worker) builds cleanly
+- [] Confirm both Dockerfiles build for `--release`
 - [ ] Set `DATABASE_URL` on both Railway services
 - [ ] Confirm migrations run on startup
 - [ ] Smoke test: enqueue via curl → verify delivery → check `/status`

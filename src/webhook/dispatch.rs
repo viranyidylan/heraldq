@@ -96,11 +96,11 @@ impl TaskHandler for SendWebhook {
         );
 
         let timestamp_utc = Utc::now().timestamp().to_string();
-        let body = serde_json::to_vec(&self.payload)
+        let body_as_bytes = serde_json::to_vec(&self.payload)
             .expect("payload serialization should not fail");
-        let hex_sig = sign_bytes(app_state.signing_secret.as_bytes(), &timestamp_utc, &body);
+        let hex_sig = sign_bytes(app_state.signing_secret.as_bytes(), &timestamp_utc, &body_as_bytes);
         let signature_header = format!("t={},v1={}", timestamp_utc, hex_sig);
-        let result = dispatch_http(http_client, &self, body, signature_header).await;
+        let result = dispatch_http(http_client, &self, body_as_bytes, signature_header).await;
 
         let res = match result {
             Ok(StatusAction::Success) => {
@@ -143,12 +143,12 @@ impl TaskHandler for SendWebhook {
     }
 }
 
-pub fn sign_bytes(secret: &[u8], timestamp_utc: &str, body: &[u8]) -> String {
+pub fn sign_bytes(secret: &[u8], timestamp_utc: &str, body_as_bytes: &[u8]) -> String {
     let mut mac = HmacSha256::new_from_slice(secret)
         .expect("HMAC can take key of any size");
     mac.update(timestamp_utc.as_bytes());
     mac.update(b".");
-    mac.update(body);
+    mac.update(body_as_bytes);
     hex::encode(mac.finalize().into_bytes())
 }
 
