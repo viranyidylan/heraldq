@@ -1,7 +1,18 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
-pub async fn create_tenant(pool: &PgPool, name: &str) -> Result<uuid::Uuid, sqlx::Error> {
+use crate::error::AppError;
+
+pub async fn redeem_invite_code(pool: &PgPool, invite_code: &str) -> Result<(), AppError> {
+    if !invite_code.contains("dylan") {
+        Err(AppError::InvalidInviteCode)
+    } else {
+        Ok(())
+    }
+}
+
+pub async fn create_tenant(pool: &PgPool, name: &str, email: &str) -> Result<uuid::Uuid, sqlx::Error> {
+    // TODO include email when inserting tenant
     let row = sqlx::query!(
         "INSERT INTO tenants (name, tier) VALUES ($1, 'free') RETURNING id",
         name,

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO beta_codes (code) VALUES ($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9ba6da64b14b5fb3ccb65f1d500df59f9c3efd7b736ec16a8fe124bd16e958c2"
+}

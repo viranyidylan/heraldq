@@ -69,7 +69,9 @@ async fn add_job(
 
 #[derive(Deserialize)]
 struct SignupRequest {
+    invite_code: String,
     name: String,
+    email: String,
 }
 
 #[derive(Serialize)]
@@ -83,7 +85,12 @@ async fn signup(
     State(state): State<AppState>,
     extract::Json(body): extract::Json<SignupRequest>,
 ) -> Result<(StatusCode, Json<SignupResponse>), AppError> {
-    let tenant_id = crate::db::tenants::create_tenant(&state.pg_pool, &body.name).await?;
+
+    crate::db::tenants::redeem_invite_code(&state.pg_pool, &body.invite_code).await?;
+
+    let email_parsed = body.email;
+
+let tenant_id = crate::db::tenants::create_tenant(&state.pg_pool, &body.name, &email_parsed).await?;
 
     let raw_key = auth::generate_api_key();
     let key_hash = auth::hash_api_key(&raw_key);

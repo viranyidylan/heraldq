@@ -35,7 +35,6 @@
 - [o] HMAC-SHA256 payload signing on outbound webhooks — table stakes, every serious buyer asks:
     - [] How are secrets generated? Where do they live?
     - [x] Signature header format and structure?
-- [] SSRF hardening - ValidatedUrl newtype (parse, don't validate)
 - [] Stripe integration / payment link ($29 / $79 / $199)
 - [] One-curl demo that proves value end-to-end: `curl -X POST .../api/v1/webhooks` → delivers to a test URL → visible in `/status`
 
@@ -49,6 +48,11 @@
 - [ ] Change `WebhookRequest.destination` and `SendWebhook.destination` to `ValidatedUrl`
 - [ ] Create `DestinationError` enum, wire into `AppError` as 400 (not 500)
 - [ ] Tests: private IPs rejected, loopback rejected, metadata endpoint rejected, valid HTTPS passes, bare IPs rejected
+
+### Rate Limiting
+- [ ] Wire `tower_governor` to `POST /webhook`
+- [ ] 1000 req/min per IP as starting point
+- [ ] Per-key rate limits
 
 ### Payload types
 - [] Payload hardening - Decide what you want to allow and disallow in the payload
@@ -72,11 +76,6 @@
 - [x] Add `tracing` + `tracing-subscriber` with JSON formatter + `EnvFilter`
 - [x] Log: job enqueued, dispatch attempt, success, failure with error context
 - [x] Initialize in both `main()` functions
-
-### Rate Limiting
-- [ ] Wire `tower_governor` to `POST /webhook`
-- [ ] 1000 req/min per IP as starting point
-- [ ] Per-key rate limits
 
 ### Status + Observability
 - [x] `GET /status` JSON: `{ queued_today, dispatched_today, failed_today, dlq_total, uptime_seconds }`

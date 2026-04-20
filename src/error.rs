@@ -15,6 +15,8 @@ pub enum AppError {
     JobEnqueue(#[from] GraphileWorkerError),
     // classic not found error
     // NotFound()
+    #[error("invalid invite code")]
+    InvalidInviteCode
 }
 
 impl IntoResponse for AppError {
@@ -29,6 +31,7 @@ impl IntoResponse for AppError {
                 error!(error = %e, "Job enqueue error");
                 (StatusCode::INTERNAL_SERVER_ERROR, "job enqueue error")
             }
+            Self::InvalidInviteCode => (StatusCode::BAD_REQUEST, "invalid invite code")
         };
         (status, message.to_owned()).into_response()
     }
