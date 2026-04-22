@@ -72,6 +72,18 @@ pub async fn create_tenant(
     Ok(row.id)
 }
 
+pub async fn get_hmac_secret(
+    pool: &sqlx::PgPool,
+    tenant_id: uuid::Uuid,
+) -> Result<String, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT hmac_secret FROM tenants WHERE id = $1"#,
+        tenant_id,
+    )
+    .fetch_one(pool)
+    .await
+}
+
 pub async fn create_api_key(
     conn: &mut sqlx::PgConnection,
     tenant_id: uuid::Uuid,

@@ -3,7 +3,7 @@
 - [x] per tenant hmac secret and signup_codes table
 - [x] hmac secret generation logic
 - [x] update /signup to require email and invite_code
-- [] dispatch.rs loads the per-tenant hmac secret
+- [x] dispatch.rs loads the per-tenant hmac secret
 - [x] create a script that seeds some invite codes
 
 then 

@@ -23,5 +23,4 @@ pub struct AppState {
 pub struct WorkerState {
     pub http_client: Client,
     pub pg_pool: PgPool,
-    pub signing_secret: std::sync::Arc<String>,
 }
