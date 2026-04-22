@@ -76,6 +76,7 @@ pub async fn get_hmac_secret(
     pool: &sqlx::PgPool,
     tenant_id: uuid::Uuid,
 ) -> Result<String, sqlx::Error> {
+    // Consider caching the tenant's hmac secret depending on volume
     sqlx::query_scalar!(
         r#"SELECT hmac_secret FROM tenants WHERE id = $1"#,
         tenant_id,

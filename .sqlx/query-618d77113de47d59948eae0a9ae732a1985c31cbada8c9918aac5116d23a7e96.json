@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT redeemed_at FROM beta_codes WHERE code = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "redeemed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "618d77113de47d59948eae0a9ae732a1985c31cbada8c9918aac5116d23a7e96"
+}

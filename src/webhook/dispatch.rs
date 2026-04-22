@@ -101,6 +101,10 @@ impl TaskHandler for SendWebhook {
         let body_as_bytes = serde_json::to_vec(&self.payload)
             .expect("payload serialization should not fail");
 
+    // TODO Support HMAC rotation: dual-secret rotation pattern: 
+    //      add hmac_secret_previous column, 
+    //      convert get_hmac_secret → get_hmac_secrets returning Vec<String>, 
+    //      loop in dispatch to emit v1=<new>,v1=<old>.
         let result: Result<StatusAction, DispatchError> =
             match db::tenants::get_hmac_secret(pg_pool, self.tenant_id).await {
                 Ok(secret) => {

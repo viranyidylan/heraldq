@@ -5,7 +5,7 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{Duration, Utc};
-use rand::{Rng, RngExt};
+use rand::RngExt;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -81,12 +81,6 @@ struct SignupResponse {
     hmac_secret: String,
     expires_at: chrono::DateTime<Utc>,
 }
-
-// fn generate_hmac_secret() -> String {
-//     let mut data = [0u8; 64];
-//     rand::rng().fill_bytes(&mut data);
-//     hex::encode(data)
-// }
 
 async fn signup(
     State(state): State<AppState>,
