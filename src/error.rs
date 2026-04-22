@@ -5,33 +5,45 @@ use tracing::error;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error("unauthorized error")]
+    // --- infra ---
+    #[error("unauthorized")]
     Unauthorized,
-    // db failure
-    #[error("database error")]
-    Database(#[from] sqlx::Error),
+    // generic 5xx bucket — real cause logged, never in the response body
+    #[error("internal server error")]
+    Internal(#[from] sqlx::Error),
     // graphile job add failure
     #[error("job enqueue error")]
     JobEnqueue(#[from] GraphileWorkerError),
-    // classic not found error
-    // NotFound()
+
+    // --- auth / signup ---
     #[error("invalid invite code")]
-    InvalidInviteCode
+    InvalidInviteCode,
+    #[error("invite code already redeemed")]
+    InviteCodeAlreadyRedeemed,
+    #[error("email already registered")]
+    EmailAlreadyRegistered,
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match self {
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
-            Self::Database(ref e) => {
-                error!(error = %e, "Database error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "database error")
+            Self::Internal(ref e) => {
+                error!(error = ?e, "internal server error");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             }
             Self::JobEnqueue(ref e) => {
-                error!(error = %e, "Job enqueue error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "job enqueue error")
+                error!(error = ?e, "job enqueue error");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             }
-            Self::InvalidInviteCode => (StatusCode::BAD_REQUEST, "invalid invite code")
+            Self::InvalidInviteCode => (StatusCode::BAD_REQUEST, "invalid invite code"),
+            Self::InviteCodeAlreadyRedeemed => {
+                (StatusCode::CONFLICT, "invite code already redeemed")
+            }
+            Self::EmailAlreadyRegistered => (
+                StatusCode::CONFLICT,
+                "A tenant with this email address is already registered",
+            ),
         };
         (status, message.to_owned()).into_response()
     }
@@ -55,11 +67,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn database_error_does_not_leak_internals() {
-        let response = AppError::Database(sqlx::Error::RowNotFound).into_response();
+    async fn internal_error_does_not_leak_internals() {
+        let response = AppError::Internal(sqlx::Error::RowNotFound).into_response();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let body = response_body(response).await;
-        assert_eq!(body, "database error", "response must not contain internal error details");
+        assert_eq!(
+            body, "Internal server error",
+            "response must not contain internal error details"
+        );
     }
 
     #[tokio::test]
@@ -68,6 +83,21 @@ mod tests {
         let response = AppError::JobEnqueue(inner).into_response();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let body = response_body(response).await;
-        assert_eq!(body, "job enqueue error", "response must not contain internal error details");
+        assert_eq!(
+            body, "Internal server error",
+            "response must not contain internal error details"
+        );
+    }
+
+    #[tokio::test]
+    async fn email_already_registered_is_409() {
+        let response = AppError::EmailAlreadyRegistered.into_response();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn invite_code_already_redeemed_is_409() {
+        let response = AppError::InviteCodeAlreadyRedeemed.into_response();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
     }
 }

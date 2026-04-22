@@ -5,7 +5,7 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{Duration, Utc};
-use rand::RngExt;
+use rand::{Rng, RngExt};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -42,7 +42,7 @@ pub fn build(state: AppState) -> Router {
         .with_state(state)
 }
 
-const TRIAL_DURATION_DAYS: i64 = 7;
+const TRIAL_DURATION_DAYS: i64 = 14;
 
 async fn ping() -> &'static str {
     "pong"
@@ -78,26 +78,53 @@ struct SignupRequest {
 struct SignupResponse {
     tenant_id: uuid::Uuid,
     api_key: String,
+    hmac_secret: String,
     expires_at: chrono::DateTime<Utc>,
 }
+
+// fn generate_hmac_secret() -> String {
+//     let mut data = [0u8; 64];
+//     rand::rng().fill_bytes(&mut data);
+//     hex::encode(data)
+// }
 
 async fn signup(
     State(state): State<AppState>,
     extract::Json(body): extract::Json<SignupRequest>,
 ) -> Result<(StatusCode, Json<SignupResponse>), AppError> {
-
-    crate::db::tenants::redeem_invite_code(&state.pg_pool, &body.invite_code).await?;
-
+    let hmac_secret = auth::generate_hmac_secret();
     let email_parsed = body.email;
 
-let tenant_id = crate::db::tenants::create_tenant(&state.pg_pool, &body.name, &email_parsed).await?;
+    let mut tx = state.pg_pool.begin().await?;
 
+    let tenant_id = crate::db::tenants::create_tenant(
+        &mut *tx, 
+        &body.name, 
+        &email_parsed,
+        &hmac_secret
+    ).await?;
+
+    // redeem invite code for this tenant
+    crate::db::tenants::redeem_invite_code(
+        &mut *tx, 
+        &body.invite_code, 
+        tenant_id
+    ).await?;
+
+    // if that worked, create and serve their api key
     let raw_key = auth::generate_api_key();
     let key_hash = auth::hash_api_key(&raw_key);
     let expires_at = Utc::now() + Duration::days(TRIAL_DURATION_DAYS);
 
-    crate::db::tenants::create_api_key(&state.pg_pool, tenant_id, &key_hash, "trial", expires_at)
-        .await?;
+    crate::db::tenants::create_api_key(
+        &mut *tx, 
+        tenant_id, 
+        &key_hash, 
+        "trial", 
+        expires_at
+    ).await?;
+
+    tx.commit().await?;
 
     info!(tenant_id = %tenant_id, "New trial tenant signed up");
 
@@ -106,6 +133,7 @@ let tenant_id = crate::db::tenants::create_tenant(&state.pg_pool, &body.name, &e
         Json(SignupResponse {
             tenant_id,
             api_key: raw_key,
+            hmac_secret,
             expires_at,
         }),
     ))

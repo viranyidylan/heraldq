@@ -1,43 +1,93 @@
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
 
 use crate::error::AppError;
 
-pub async fn redeem_invite_code(pool: &PgPool, invite_code: &str) -> Result<(), AppError> {
-    if !invite_code.contains("dylan") {
-        Err(AppError::InvalidInviteCode)
-    } else {
-        Ok(())
+// 3e — smoke test: valid code → 201; invalid code → 400; reused code → 400
+
+pub async fn redeem_invite_code(
+    // conn: &Transaction<'_, Postgres>,
+    conn: &mut sqlx::PgConnection,
+    invite_code: &str,
+    tenant_id: uuid::Uuid,
+) -> Result<String, AppError> {
+    // update beta_codes
+    // set redeemed_at, redeemed_by_tenant_id
+    // where the code = sign_up code
+    // and redeemed_at IS NULL and expires_at
+    // returning CODE
+    let result = sqlx::query!(
+        r#"UPDATE beta_codes
+            SET redeemed_at = NOW(),
+                redeemed_by_tenant_id = $2
+            WHERE code = $1
+                AND redeemed_at IS NULL
+                AND (expires_at IS NULL OR expires_at > NOW())
+            RETURNING code"#,
+        invite_code,
+        tenant_id,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    if let Some(row) = result {
+        return Ok(row.code);
+    }
+
+    // UPDATE matched zero rows — disambiguate: is the code missing/expired, or already redeemed?
+    let existing = sqlx::query!(
+        r#"SELECT redeemed_at FROM beta_codes WHERE code = $1"#,
+        invite_code,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    match existing {
+        Some(row) if row.redeemed_at.is_some() => Err(AppError::InviteCodeAlreadyRedeemed),
+        _ => Err(AppError::InvalidInviteCode),
     }
 }
 
-pub async fn create_tenant(pool: &PgPool, name: &str, email: &str) -> Result<uuid::Uuid, sqlx::Error> {
-    // TODO include email when inserting tenant
+pub async fn create_tenant(
+    conn: &mut sqlx::PgConnection,
+    name: &str,
+    email: &str,
+    hmac_secret: &str,
+) -> Result<uuid::Uuid, AppError> {
     let row = sqlx::query!(
-        "INSERT INTO tenants (name, tier) VALUES ($1, 'free') RETURNING id",
+        r#"INSERT INTO tenants (name, tier, email, hmac_secret)
+            VALUES ($1, 'free', $2, $3) RETURNING id"#,
         name,
+        email,
+        hmac_secret,
     )
-    .fetch_one(pool)
-    .await?;
+    .fetch_one(conn)
+    .await
+    .map_err(|e| match &e {
+        sqlx::Error::Database(db_err) if db_err.code().as_deref() == Some("23505") => {
+            AppError::EmailAlreadyRegistered
+        }
+        _ => AppError::from(e),
+    })?;
 
     Ok(row.id)
 }
 
 pub async fn create_api_key(
-    pool: &PgPool,
+    conn: &mut sqlx::PgConnection,
     tenant_id: uuid::Uuid,
     key_hash: &str,
     name: &str,
     expires_at: DateTime<Utc>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
-        "INSERT INTO api_keys (tenant_id, key_hash, name, expires_at) VALUES ($1, $2, $3, $4)",
+        r#"INSERT INTO api_keys (tenant_id, key_hash, name, expires_at) 
+            VALUES ($1, $2, $3, $4)"#,
         tenant_id,
         key_hash,
         name,
         expires_at,
     )
-    .execute(pool)
+    .execute(conn)
     .await?;
 
     Ok(())

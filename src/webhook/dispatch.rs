@@ -98,6 +98,7 @@ impl TaskHandler for SendWebhook {
         let timestamp_utc = Utc::now().timestamp().to_string();
         let body_as_bytes = serde_json::to_vec(&self.payload)
             .expect("payload serialization should not fail");
+        // TODO, load the per-tenant hmac secret
         let hex_sig = sign_bytes(app_state.signing_secret.as_bytes(), &timestamp_utc, &body_as_bytes);
         let signature_header = format!("t={},v1={}", timestamp_utc, hex_sig);
         let result = dispatch_http(http_client, &self, body_as_bytes, signature_header).await;

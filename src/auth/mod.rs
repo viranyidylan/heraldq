@@ -1,10 +1,16 @@
 use axum::extract::{FromRef, FromRequestParts};
-use rand::RngExt;
+use rand::{Rng, RngExt};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use tracing::warn;
 
 use crate::error::AppError;
+
+pub fn generate_hmac_secret() -> String {
+    let mut data = [0u8; 64];
+    rand::rng().fill_bytes(&mut data);
+    hex::encode(data)
+}
 
 /// Generate a prefixed API key: `sliq_` + 32 random hex chars (16 bytes).
 pub fn generate_api_key() -> String {
