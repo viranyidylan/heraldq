@@ -6,6 +6,8 @@ use tracing::error;
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     // --- infra ---
+    #[error("Too many requests")]
+    TooManyRequests,
     #[error("unauthorized")]
     Unauthorized,
     // generic 5xx bucket — real cause logged, never in the response body
@@ -27,6 +29,7 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match self {
+            Self::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, "too many requests"),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::Internal(ref e) => {
                 error!(error = ?e, "internal server error");

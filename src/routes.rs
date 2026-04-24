@@ -12,7 +12,10 @@ use sqlx::PgPool;
 
 use tracing::{debug, info};
 
-use crate::{AppState, WebhookRequest, auth, db::stats::WebhookActivitySummary, error::AppError, queue::TenantQueue, webhook};
+use crate::{
+    AppState, WebhookRequest, auth, db::stats::WebhookActivitySummary, error::AppError,
+    queue::TenantQueue, webhook,
+};
 
 impl FromRef<AppState> for PgPool {
     fn from_ref(app_state: &AppState) -> PgPool {
@@ -28,7 +31,7 @@ struct HealthCheckResponse {
 
 pub fn build(state: AppState) -> Router {
     let v1 = Router::new()
-        .route("/webhook", post(add_job))
+        .route("/webhook", post(enqueue_webhook))
         .route("/signup", post(signup))
         .route("/mock", post(mock))
         .route("/dlq", get(dlq))
@@ -44,8 +47,8 @@ pub fn build(state: AppState) -> Router {
 
 const TRIAL_DURATION_DAYS: i64 = 14;
 
-async fn ping() -> &'static str {
-    "pong"
+async fn ping(State(_state): State<AppState>) -> Result<&'static str, StatusCode> {
+    Ok("pong")
 }
 
 async fn health() -> Json<HealthCheckResponse> {
@@ -55,12 +58,16 @@ async fn health() -> Json<HealthCheckResponse> {
     })
 }
 
-async fn add_job(
+async fn enqueue_webhook(
     State(state): State<AppState>,
     api_key: auth::ValidApiKey,
     extract::Json(request_body): extract::Json<WebhookRequest>,
 ) -> Result<StatusCode, AppError> {
     info!(tenant_id = %api_key.tenant_id, "Webhook enqueue requested");
+
+    if state.webhook_limiter.check().is_err() {
+        return Err(AppError::TooManyRequests)
+    };
 
     webhook::enqueue(&state.worker_utils, api_key.tenant_id, request_body).await?;
 
@@ -86,37 +93,28 @@ async fn signup(
     State(state): State<AppState>,
     extract::Json(body): extract::Json<SignupRequest>,
 ) -> Result<(StatusCode, Json<SignupResponse>), AppError> {
+    if state.webhook_limiter.check().is_err() {
+        return Err(AppError::TooManyRequests)
+    };
+
     let hmac_secret = auth::generate_hmac_secret();
     let email_parsed = body.email;
 
     let mut tx = state.pg_pool.begin().await?;
 
-    let tenant_id = crate::db::tenants::create_tenant(
-        &mut *tx, 
-        &body.name, 
-        &email_parsed,
-        &hmac_secret
-    ).await?;
+    let tenant_id =
+        crate::db::tenants::create_tenant(&mut *tx, &body.name, &email_parsed, &hmac_secret)
+            .await?;
 
     // redeem invite code for this tenant
-    crate::db::tenants::redeem_invite_code(
-        &mut *tx, 
-        &body.invite_code, 
-        tenant_id
-    ).await?;
+    crate::db::tenants::redeem_invite_code(&mut *tx, &body.invite_code, tenant_id).await?;
 
     // if that worked, create and serve their api key
     let raw_key = auth::generate_api_key();
     let key_hash = auth::hash_api_key(&raw_key);
     let expires_at = Utc::now() + Duration::days(TRIAL_DURATION_DAYS);
 
-    crate::db::tenants::create_api_key(
-        &mut *tx, 
-        tenant_id, 
-        &key_hash, 
-        "trial", 
-        expires_at
-    ).await?;
+    crate::db::tenants::create_api_key(&mut *tx, tenant_id, &key_hash, "trial", expires_at).await?;
 
     tx.commit().await?;
 

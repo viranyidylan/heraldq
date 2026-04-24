@@ -1,4 +1,4 @@
-use rand::{Rng, RngExt};
+use rand::RngExt;
 use rand::distr::Alphanumeric;
 use sliq::{config::AppConfig, db};
 

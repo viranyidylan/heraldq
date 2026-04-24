@@ -20,7 +20,7 @@ pub async fn enqueue(
             },
             JobSpecBuilder::new()
                 .queue_name(tenant_queue.as_str())
-                .max_attempts(5)
+                .max_attempts(5) // 1s, 2s, 4s, 8s, 16s
                 .build(),
         )
         .await?;

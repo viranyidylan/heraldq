@@ -1,4 +1,8 @@
+use std::sync::Arc;
+
+use governor::{Quota, RateLimiter};
 use graphile_worker::WorkerUtils;
+use nonzero_ext::nonzero;
 use sliq::{AppState, config::AppConfig, db, routes};
 use tracing::info;
 
@@ -16,10 +20,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let utils = WorkerUtils::new(pg_pool.clone(), config.schema.clone());
 
+    let webhook_limiter = Arc::new(
+        // RateLimiter::keyed(Quota::per_minute(nonzero!(5u32)))
+        RateLimiter::direct(Quota::per_minute(nonzero!(1000u32)))
+    );
+
+    // let signup_limiter = Arc::new(
+    //     // RateLimiter::keyed(Quota::per_minute(nonzero!(5u32)))
+    //     RateLimiter::direct(Quota::per_minute(nonzero!(100u32)))
+    // );
+
     let state = AppState {
         pg_pool,
         worker_utils: utils,
         schema: config.schema,
+        webhook_limiter,
     };
 
     let app = routes::build(state);
