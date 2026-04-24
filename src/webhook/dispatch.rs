@@ -4,7 +4,6 @@ use graphile_worker::{IntoTaskHandlerResult, TaskHandler, WorkerContext, WorkerC
 use hmac::{Hmac, Mac};
 use reqwest::Client;
 use sha2::Sha256;
-use std::time::Duration;
 use tracing::{error, info, warn};
 
 use crate::{WorkerState, db};
@@ -14,37 +13,62 @@ use super::SendWebhook;
 type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, PartialEq)]
+pub enum FailureReason {
+    HttpStatus(reqwest::StatusCode),
+    Timeout,
+    Connect,
+    Network,
+}
+
+impl std::fmt::Display for FailureReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FailureReason::HttpStatus(s) => write!(f, "http {}", s),
+            FailureReason::Timeout => write!(f, "timeout"),
+            FailureReason::Connect => write!(f, "connect"),
+            FailureReason::Network => write!(f, "network"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 enum StatusAction {
     Success,
     /// Transient failure — worker should retry
-    Retry(reqwest::StatusCode),
+    Retry(FailureReason),
     /// Permanent failure — job should be dead-lettered, not retried
-    PermanentFail(reqwest::StatusCode),
-    Unexpected(reqwest::StatusCode),
+    PermanentFail(FailureReason),
+    Unexpected(FailureReason),
 }
 
-fn classify_status(status: reqwest::StatusCode) -> StatusAction {
+fn classify_http_status(status: reqwest::StatusCode) -> StatusAction {
     if status.is_success() {
         StatusAction::Success
     } else if status.is_server_error() {
-        StatusAction::Retry(status)
+        StatusAction::Retry(FailureReason::HttpStatus(status))
     } else if status.is_client_error() {
-        StatusAction::PermanentFail(status)
+        StatusAction::PermanentFail(FailureReason::HttpStatus(status))
     } else {
-        StatusAction::Unexpected(status)
+        StatusAction::Unexpected(FailureReason::HttpStatus(status))
+    }
+}
+
+fn classify_reqwest_error(err: &reqwest::Error) -> StatusAction {
+    if err.is_timeout() {
+        StatusAction::Retry(FailureReason::Timeout)
+    } else if err.is_connect() {
+        StatusAction::PermanentFail(FailureReason::Connect)
+    } else {
+        StatusAction::Retry(FailureReason::Network)
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum DispatchError {
-    #[error("http request failed: {0}")]
-    Network(#[from] reqwest::Error),
-    #[error("server error: {0}")]
-    ServerError(reqwest::StatusCode),
-    #[error("client error: {0}")]
-    ClientError(reqwest::StatusCode),
-    #[error("unexpected status: {0}")]
-    UnexpectedStatus(reqwest::StatusCode),
+    #[error("retryable failure: {0}")]
+    Retryable(FailureReason),
+    #[error("unexpected: {0}")]
+    Unexpected(FailureReason),
     #[error("failed to permanently fail job: {0}")]
     WorkerError(#[from] GraphileWorkerError),
     #[error("missing worker extension: {0}")]
@@ -58,18 +82,19 @@ async fn dispatch_http(
     webhook: &SendWebhook,
     body: Vec<u8>,
     signature_header: String,
-) -> Result<StatusAction, DispatchError> {
-    let response = http
+) -> StatusAction {
+    match http
         .post(&webhook.destination)
         .header("Content-Type", "application/json")
         .header("Idempotency-Key", &webhook.id)
         .header("Sliq-Signature", signature_header)
         .body(body)
-        .timeout(Duration::from_secs(30))
         .send()
-        .await?;
-
-    Ok(classify_status(response.status()))
+        .await
+    {
+        Ok(response) => classify_http_status(response.status()),
+        Err(e) => classify_reqwest_error(&e),
+    }
 }
 
 impl TaskHandler for SendWebhook {
@@ -110,7 +135,7 @@ impl TaskHandler for SendWebhook {
                 Ok(secret) => {
                     let hex_sig = sign_bytes(secret.as_bytes(), &timestamp_utc, &body_as_bytes);
                     let signature_header = format!("t={},v1={}", timestamp_utc, hex_sig);
-                    dispatch_http(http_client, &self, body_as_bytes, signature_header).await
+                    Ok(dispatch_http(http_client, &self, body_as_bytes, signature_header).await)
                 }
                 Err(e) => Err(DispatchError::Database(e)),
             };
@@ -123,19 +148,19 @@ impl TaskHandler for SendWebhook {
                 info!(job_id = %job_id, "Webhook delivered successfully");
                 Ok(())
             }
-            Ok(StatusAction::Retry(status)) => {
-                warn!(job_id = %job_id, status = status.as_u16(), "Server error, will retry");
-                Err(DispatchError::ServerError(status))
+            Ok(StatusAction::Retry(reason)) => {
+                warn!(job_id = %job_id, reason = %reason, "Retryable failure, will retry");
+                Err(DispatchError::Retryable(reason))
             }
-            Ok(StatusAction::PermanentFail(status)) => {
-                warn!(job_id = %job_id, status = status.as_u16(), "Client error, permanently failing");
+            Ok(StatusAction::PermanentFail(reason)) => {
+                warn!(job_id = %job_id, reason = %reason, "Permanent failure, dead-lettering");
                 let _ = db::dlq::insert(pg_pool, self.clone(), job.clone()).await;
                 ctx.utils()
-                    .permanently_fail_jobs(&[*job_id], &format!("client error: {}", status))
+                    .permanently_fail_jobs(&[*job_id], &format!("permanent: {}", reason))
                     .await?;
                 Ok(())
             }
-            Ok(StatusAction::Unexpected(status)) => Err(DispatchError::UnexpectedStatus(status)),
+            Ok(StatusAction::Unexpected(reason)) => Err(DispatchError::Unexpected(reason)),
             Err(e) => Err(e),
         };
 
@@ -169,6 +194,7 @@ pub fn sign_bytes(secret: &[u8], timestamp_utc: &str, body_as_bytes: &[u8]) -> S
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::time::Duration;
     use wiremock::matchers::{header, method};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -200,9 +226,7 @@ mod tests {
 
         let webhook = test_webhook(&server.uri());
         let (body, sig) = sign_for_test(&webhook);
-        let result = dispatch_http(&Client::new(), &webhook, body, sig)
-            .await
-            .unwrap();
+        let result = dispatch_http(&Client::new(), &webhook, body, sig).await;
         assert_eq!(result, StatusAction::Success);
     }
 
@@ -216,12 +240,12 @@ mod tests {
 
         let webhook = test_webhook(&server.uri());
         let (body, sig) = sign_for_test(&webhook);
-        let result = dispatch_http(&Client::new(), &webhook, body, sig)
-            .await
-            .unwrap();
+        let result = dispatch_http(&Client::new(), &webhook, body, sig).await;
         assert_eq!(
             result,
-            StatusAction::Retry(reqwest::StatusCode::SERVICE_UNAVAILABLE)
+            StatusAction::Retry(FailureReason::HttpStatus(
+                reqwest::StatusCode::SERVICE_UNAVAILABLE
+            ))
         );
     }
 
@@ -235,22 +259,40 @@ mod tests {
 
         let webhook = test_webhook(&server.uri());
         let (body, sig) = sign_for_test(&webhook);
-        let result = dispatch_http(&Client::new(), &webhook, body, sig)
-            .await
-            .unwrap();
+        let result = dispatch_http(&Client::new(), &webhook, body, sig).await;
         assert_eq!(
             result,
-            StatusAction::PermanentFail(reqwest::StatusCode::NOT_FOUND)
+            StatusAction::PermanentFail(FailureReason::HttpStatus(
+                reqwest::StatusCode::NOT_FOUND
+            ))
         );
     }
 
     #[tokio::test]
-    async fn dispatch_returns_network_error_on_connection_refused() {
+    async fn dispatch_classifies_connection_refused_as_permanent_fail() {
         let webhook = test_webhook("http://127.0.0.1:1"); // nothing listening
 
         let (body, sig) = sign_for_test(&webhook);
         let result = dispatch_http(&Client::new(), &webhook, body, sig).await;
-        assert!(matches!(result, Err(DispatchError::Network(_))));
+        assert_eq!(result, StatusAction::PermanentFail(FailureReason::Connect));
+    }
+
+    #[tokio::test]
+    async fn dispatch_classifies_timeout_as_retry() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(5)))
+            .mount(&server)
+            .await;
+
+        let client = Client::builder()
+            .timeout(Duration::from_millis(50))
+            .build()
+            .unwrap();
+        let webhook = test_webhook(&server.uri());
+        let (body, sig) = sign_for_test(&webhook);
+        let result = dispatch_http(&client, &webhook, body, sig).await;
+        assert_eq!(result, StatusAction::Retry(FailureReason::Timeout));
     }
 
     #[tokio::test]
@@ -265,9 +307,7 @@ mod tests {
 
         let webhook = test_webhook(&server.uri());
         let (body, sig) = sign_for_test(&webhook);
-        dispatch_http(&Client::new(), &webhook, body, sig)
-            .await
-            .unwrap();
+        dispatch_http(&Client::new(), &webhook, body, sig).await;
 
         // wiremock will fail the test if the headers don't match —
         // unmatched requests cause a panic on MockServer drop

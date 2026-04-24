@@ -18,7 +18,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     db::run_migrations(&pg_pool).await?;
 
     let worker_state = WorkerState {
-        http_client: reqwest::Client::new(),
+        http_client: reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()?,
         pg_pool: pg_pool.clone(),
     };
 
