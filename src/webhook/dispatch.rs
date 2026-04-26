@@ -53,6 +53,7 @@ fn classify_http_status(status: reqwest::StatusCode) -> StatusAction {
     }
 }
 
+// Consider expanding the granularity of this reqwest error retry strategy
 fn classify_reqwest_error(err: &reqwest::Error) -> StatusAction {
     if err.is_timeout() {
         StatusAction::Retry(FailureReason::Timeout)
