@@ -4,21 +4,28 @@ use uuid::Uuid;
 
 use crate::{SendWebhook, WebhookRequest};
 
-pub async fn insert(pool: &PgPool, webhook: SendWebhook, job: Job) -> Result<(), sqlx::Error> {
+pub async fn insert(pool: &PgPool, webhook: SendWebhook, job: Job, 
+    failure_reason: Option<String>, status_code: Option<i16>
+) -> Result<(), sqlx::Error> {
     let id = webhook.id;
     let tenant_id = webhook.tenant_id;
     let destination = webhook.destination;
     let payload = serde_json::json!(webhook.payload);
     let enqueued_at = job.created_at();
-    
+
     sqlx::query!(
-        r#"INSERT INTO dead_letter_queue (id, tenant_id, destination, payload, enqueued_at) 
-        VALUES ($1, $2, $3, $4, $5)"#,
+        r#"INSERT INTO dead_letter_queue (
+            id, tenant_id, destination, payload, 
+            enqueued_at, failure_reason, status_code
+            ) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
         id,
         tenant_id,
         destination,
         payload,
-        enqueued_at
+        enqueued_at, 
+        failure_reason, 
+        status_code
     )
     .execute(pool)
     .await?;
@@ -44,7 +51,9 @@ pub async fn list_page(
     offset: i64,
 ) -> Result<Vec<WebhookRequest>, sqlx::Error> {
     let messages = sqlx::query_as(
-        "SELECT destination, payload FROM dead_letter_queue WHERE tenant_id = $1 ORDER BY abandoned_at DESC, id DESC LIMIT $2 OFFSET $3",
+        r#"SELECT destination, payload, reason, status_code 
+        FROM dead_letter_queue WHERE tenant_id = $1 
+        ORDER BY abandoned_at DESC, id DESC LIMIT $2 OFFSET $3"#,
     )
     .bind(tenant_id)
     .bind(limit)

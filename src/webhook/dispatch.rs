@@ -20,6 +20,15 @@ pub enum FailureReason {
     Network,
 }
 
+impl FailureReason {
+    fn status_code(&self) -> Option<i16> {
+        match self {
+            FailureReason::HttpStatus(s) => Some(s.as_u16() as i16),
+            _ => None,
+        }
+    }
+}
+
 impl std::fmt::Display for FailureReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -76,6 +85,17 @@ pub enum DispatchError {
     MissingExtension(&'static str),
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
+}
+
+impl DispatchError {
+    fn failure_reason(&self) -> Option<&FailureReason> {
+        match self {
+            DispatchError::Retryable(r) | DispatchError::Unexpected(r) => Some(r),
+            DispatchError::WorkerError(_)
+            | DispatchError::MissingExtension(_)
+            | DispatchError::Database(_) => None,
+        }
+    }
 }
 
 async fn dispatch_http(
@@ -155,7 +175,11 @@ impl TaskHandler for SendWebhook {
             }
             Ok(StatusAction::PermanentFail(reason)) => {
                 warn!(job_id = %job_id, reason = %reason, "Permanent failure, dead-lettering");
-                let _ = db::dlq::insert(pg_pool, self.clone(), job.clone()).await;
+                let _ = db::dlq::insert(
+                    pg_pool, self.clone(), job.clone(), 
+                    Some(reason.to_string()), reason.status_code()
+                ).await;
+                
                 ctx.utils()
                     .permanently_fail_jobs(&[*job_id], &format!("permanent: {}", reason))
                     .await?;
@@ -168,7 +192,14 @@ impl TaskHandler for SendWebhook {
         if let Err(ref e) = res
             && attempts >= max_attempts
         {
-            let _ = db::dlq::insert(pg_pool, self.clone(), job.clone()).await;
+            let reason = e.failure_reason();
+            let failure_reason = reason.map(|r| r.to_string());
+            let status_code = reason.and_then(|r| r.status_code());
+
+            let _ = db::dlq::insert(
+                pg_pool, self.clone(), job.clone(), 
+                failure_reason, status_code
+            ).await;
             error!(
                 job_id = %job_id,
                 destination = %self.destination,
