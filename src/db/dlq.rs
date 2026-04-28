@@ -51,7 +51,7 @@ pub async fn list_page(
     offset: i64,
 ) -> Result<Vec<WebhookRequest>, sqlx::Error> {
     let messages = sqlx::query_as(
-        r#"SELECT destination, payload, reason, status_code 
+        r#"SELECT destination, payload, failure_reason, status_code 
         FROM dead_letter_queue WHERE tenant_id = $1 
         ORDER BY abandoned_at DESC, id DESC LIMIT $2 OFFSET $3"#,
     )
