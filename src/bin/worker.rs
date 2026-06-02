@@ -1,4 +1,5 @@
 use graphile_worker::{self, LocalQueueConfig, RefetchDelayConfig};
+use reqwest::redirect;
 use sliq::{SendWebhook, WorkerState, config::AppConfig, db};
 use std::time::Duration;
 use tracing::info;
@@ -19,7 +20,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let worker_state = WorkerState {
         http_client: reqwest::Client::builder()
+            .redirect(redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(8))
             .timeout(Duration::from_secs(30))
+            .user_agent("HeraldQ/1.0")
             .build()?,
         pg_pool: pg_pool.clone(),
     };

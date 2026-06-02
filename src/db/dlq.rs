@@ -1,15 +1,15 @@
 use graphile_worker::Job;
-use sqlx::PgPool;
+use sqlx::{PgPool, Error};
 use uuid::Uuid;
 
 use crate::{SendWebhook, WebhookRequest};
 
-pub async fn insert(pool: &PgPool, webhook: SendWebhook, job: Job, 
+pub async fn insert(pool: &PgPool, webhook: &SendWebhook, job: &Job, 
     failure_reason: Option<String>, status_code: Option<i16>
 ) -> Result<(), sqlx::Error> {
-    let id = webhook.id;
+    let id = webhook.id.to_owned();
     let tenant_id = webhook.tenant_id;
-    let destination = webhook.destination;
+    let destination = webhook.destination.to_owned();
     let payload = serde_json::json!(webhook.payload);
     let enqueued_at = job.created_at();
 

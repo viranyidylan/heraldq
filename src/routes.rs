@@ -203,7 +203,15 @@ async fn mock(State(_state): State<AppState>) -> StatusCode {
     let roll = rand::rng().random_range(0..100);
 
     let status = if roll < 5 {
+        StatusCode::TOO_MANY_REQUESTS
+    } else if roll < 10 {
         StatusCode::IM_A_TEAPOT
+    } else if roll < 20 {
+        StatusCode::REQUEST_TIMEOUT
+    } else if roll < 30 {
+        StatusCode::TOO_EARLY
+    } else if roll < 40 {
+        StatusCode::PERMANENT_REDIRECT
     } else if roll < 85 {
         StatusCode::INTERNAL_SERVER_ERROR
     } else {
