@@ -1,5 +1,5 @@
 use graphile_worker::Job;
-use sqlx::{PgPool, Error};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{SendWebhook, WebhookRequest};
