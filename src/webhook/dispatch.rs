@@ -9,7 +9,7 @@ use crate::{db, SendWebhook, WorkerState};
 
 #[derive(Debug)]
 enum Outcome {
-    Success,
+    Success { status: Option<u16> },
     Retry { reason: String, status: Option<u16> },
     PermaFail { reason: String, status: Option<u16> },
 }
@@ -21,9 +21,6 @@ pub enum DispatchError {
 
     #[error("retryable error")]
     Retryable{ reason: String, status: Option<u16> },
-
-    #[error("http error")]
-    Http(#[from] reqwest::Error),
 
     #[error("database error")]
     Database(#[from] sqlx::Error),
@@ -76,7 +73,7 @@ impl TaskHandler for SendWebhook {
                 match status {
                     408 | 425 | 429 => Outcome::Retry { reason: r.status().to_string(), status: Some(status) }, // retry
                     500..=599       => Outcome::Retry { reason: r.status().to_string(), status: Some(status) }, // retry
-                    200..=299       => Outcome::Success, // success
+                    200..=299       => Outcome::Success { status: Some(status) }, // success
                     _               => Outcome::PermaFail { reason: r.status().to_string(), status: Some(status) } // perma-fail
                 }
             },
@@ -87,9 +84,9 @@ impl TaskHandler for SendWebhook {
         };
 
         match outcome {
-            Outcome::Success => {
+            Outcome::Success { status } => {
                 info!(webhook_id = %self.id, job_id = %job_id, "Webhook delivered successfully");
-                db::deliveries::insert(pg_pool, self, job).await?;
+                db::deliveries::insert(pg_pool, self, job, status.map(|s| s as i16)).await?;
                 Ok(())
             }
             Outcome::Retry { reason, status } => {

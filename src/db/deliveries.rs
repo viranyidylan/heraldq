@@ -3,7 +3,7 @@ use sqlx::{PgPool};
 
 use crate::SendWebhook;
 
-pub async fn insert(pool: &PgPool, webhook: SendWebhook, job: &Job) -> Result<(), sqlx::Error> {
+pub async fn insert(pool: &PgPool, webhook: SendWebhook, job: &Job, status_code: Option<i16>) -> Result<(), sqlx::Error> {
     let id = webhook.id;
     let tenant_id = webhook.tenant_id;
     let destination = webhook.destination;
@@ -11,13 +11,16 @@ pub async fn insert(pool: &PgPool, webhook: SendWebhook, job: &Job) -> Result<()
     let enqueued_at = job.created_at();
     
     sqlx::query!(
-        r#"INSERT INTO webhook_deliveries (id, tenant_id, destination, payload, enqueued_at) 
-        VALUES ($1, $2, $3, $4, $5)"#,
+        r#"INSERT INTO webhook_deliveries (
+            id, tenant_id, destination, payload, enqueued_at, status_code
+            ) 
+        VALUES ($1, $2, $3, $4, $5, $6)"#,
         id,
         tenant_id,
         destination,
         payload,
-        enqueued_at
+        enqueued_at,
+        status_code,
     )
     .execute(pool)
     .await?;

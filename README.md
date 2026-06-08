@@ -63,7 +63,7 @@ To sign up and receive an API key
 ```bash
 curl -X POST your-service.com/signup \
   -H 'Content-Type: application/json' \
-  -d '{"name": "My Company"}'
+  -d '{"name": "My Company", "invite_code":"BETA-XXXX" }'
 ```
 
 Example payload
