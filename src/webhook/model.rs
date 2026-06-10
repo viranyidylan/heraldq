@@ -15,7 +15,3 @@ pub struct SendWebhook {
     pub destination: String,
     pub payload: Value,
 }
-
-// struct SliqSignature(String);
-// impl SliqSignature {
-// }

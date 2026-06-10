@@ -24,7 +24,7 @@ pub async fn enqueue(
                 // 256s(~4mins), 512s(~8.5mins), 1024s(~17mins)
                 // 2048s(~34mins), 4096s(~68mins)
                 // 8_192s(~2.25hrs), 16_384s(~4.5hrs)
-                .max_attempts(15) 
+                .max_attempts(15)
                 .build(),
         )
         .await?;

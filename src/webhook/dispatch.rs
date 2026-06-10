@@ -24,6 +24,9 @@ pub enum DispatchError {
 
     #[error("database error")]
     Database(#[from] sqlx::Error),
+
+    #[error("failed to serialize webhook payload")]
+    Serialization(#[from] serde_json::Error),
 }
 
 impl TaskHandler for SendWebhook {
@@ -51,7 +54,7 @@ impl TaskHandler for SendWebhook {
         let pg_pool = &app_state.pg_pool;
 
         let body_as_bytes = serde_json::to_vec(&self.payload)
-            .expect("payload serialization should not fail");
+            .map_err(|e| DispatchError::Serialization(e))?;
 
         let timestamp_utc = Utc::now().timestamp().to_string();
         let secret = db::tenants::get_hmac_secret(pg_pool, self.tenant_id).await?;
