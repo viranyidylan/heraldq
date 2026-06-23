@@ -1,0 +1,11 @@
+# Tells Grafana to load dashboard JSON files from the repo so the HeraldQ
+# dashboard is version-controlled and identical across local + production.
+apiVersion: 1
+
+providers:
+  - name: heraldq
+    type: file
+    allowUiUpdates: true
+    options:
+      path: /home/dylan/dev/heraldq/observability/grafana/dashboards
+      foldersFromFilesStructure: false

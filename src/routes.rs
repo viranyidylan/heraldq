@@ -13,8 +13,7 @@ use sqlx::PgPool;
 use tracing::{debug, info};
 
 use crate::{
-    AppState, WebhookRequest, auth, db::stats::WebhookActivitySummary, error::AppError,
-    queue::TenantQueue, webhook,
+    AppState, WebhookRequest, auth, db::stats::WebhookActivitySummary, error::AppError, queue::TenantQueue, webhook::{self, ssrf::validate_destination},
 };
 
 impl FromRef<AppState> for PgPool {
@@ -47,6 +46,9 @@ pub fn build(state: AppState) -> Router {
 
 const TRIAL_DURATION_DAYS: i64 = 14;
 
+/// Per-tenant cap on webhooks enqueued per calendar month.
+const MONTHLY_WEBHOOK_LIMIT: i64 = 50_000;
+
 async fn ping(State(_state): State<AppState>) -> Result<&'static str, StatusCode> {
     Ok("pong")
 }
@@ -65,9 +67,23 @@ async fn enqueue_webhook(
 ) -> Result<StatusCode, AppError> {
     info!(tenant_id = %api_key.tenant_id, "Webhook enqueue requested");
 
-    if state.webhook_limiter.check().is_err() {
+    if state.webhook_limiter.check_key(&api_key.tenant_id).is_err() {
         return Err(AppError::TooManyRequests)
     };
+
+    validate_destination(&state.policy, &request_body.destination)?;
+
+    // Hard monthly cap, atomically counted in the DB. Only valid requests that
+    // will actually enqueue should burn a quota slot.
+    if !crate::db::quotas::increment_monthly_quota(
+        &state.pg_pool,
+        api_key.tenant_id,
+        MONTHLY_WEBHOOK_LIMIT,
+    )
+    .await?
+    {
+        return Err(AppError::MonthlyQuotaExceeded);
+    }
 
     webhook::enqueue(&state.worker_utils, api_key.tenant_id, request_body).await?;
 
@@ -93,10 +109,6 @@ async fn signup(
     State(state): State<AppState>,
     extract::Json(body): extract::Json<SignupRequest>,
 ) -> Result<(StatusCode, Json<SignupResponse>), AppError> {
-    if state.webhook_limiter.check().is_err() {
-        return Err(AppError::TooManyRequests)
-    };
-
     let hmac_secret = auth::generate_hmac_secret();
     let email_parsed = body.email;
 

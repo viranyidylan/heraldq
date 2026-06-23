@@ -3,11 +3,15 @@ use graphile_worker::errors::GraphileWorkerError;
 use reqwest::StatusCode;
 use tracing::error;
 
+use crate::webhook::ssrf::SsrfError;
+
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     // --- infra ---
     #[error("Too many requests")]
     TooManyRequests,
+    #[error("monthly webhook quota exceeded")]
+    MonthlyQuotaExceeded,
     #[error("unauthorized")]
     Unauthorized,
     // generic 5xx bucket — real cause logged, never in the response body
@@ -24,12 +28,19 @@ pub enum AppError {
     InviteCodeAlreadyRedeemed,
     #[error("email already registered")]
     EmailAlreadyRegistered,
+
+    // --- destination / url hygiene ---
+    #[error("invalid destination")]
+    InvalidDestination(#[from] SsrfError)
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match self {
             Self::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, "too many requests"),
+            Self::MonthlyQuotaExceeded => {
+                (StatusCode::TOO_MANY_REQUESTS, "monthly webhook quota exceeded")
+            }
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::Internal(ref e) => {
                 error!(error = ?e, "internal server error");
@@ -47,6 +58,10 @@ impl IntoResponse for AppError {
                 StatusCode::CONFLICT,
                 "A tenant with this email address is already registered",
             ),
+            Self::InvalidDestination(ref e) => {
+                error!(error = ?e, "invalid destination");
+                (StatusCode::BAD_REQUEST, "invalid destination")
+            }
         };
         (status, message.to_owned()).into_response()
     }
