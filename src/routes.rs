@@ -109,6 +109,10 @@ async fn signup(
     State(state): State<AppState>,
     extract::Json(body): extract::Json<SignupRequest>,
 ) -> Result<(StatusCode, Json<SignupResponse>), AppError> {
+    if state.signup_limiter.check().is_err() {
+        return Err(AppError::TooManyRequests);
+    };
+
     let hmac_secret = auth::generate_hmac_secret();
     let email_parsed = body.email;
 
