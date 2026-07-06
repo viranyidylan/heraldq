@@ -81,8 +81,15 @@ impl TaskHandler for SendWebhook {
                 }
             },
             Err(e) if e.is_builder() => Outcome::PermaFail { reason: "reqwest builder error (check for bad URL, bad config).".to_string(), status: None },
-            Err(e) if e.ssrf_block() => Outcome::PermaFail { reason: format!("blocked by SSRF policy: {}", e.get_ssrf().unwrap()), status: None },
-            Err(e) if e.is_connect() => Outcome::Retry { reason: "reqwest connection error".to_string(), status: None },
+            Err(e) if e.is_connect() => {
+                if let Some(ssrf_error) = e.ssrf_block() {
+                    // reqwest wraps our dispatch.rs ssrf failures as is_connect() error,
+                    // check for ssrf error in the stack
+                    Outcome::PermaFail { reason: format!("blocked by SSRF policy: {}", ssrf_error), status: None }
+                } else {
+                    Outcome::Retry { reason: "reqwest connection error".to_string(), status: None }
+                }
+            },
             Err(e) if e.is_timeout() => Outcome::Retry { reason: "reqwest timeout error".to_string(), status: None }, // retry
             Err(e)                   => Outcome::Retry { reason: e.to_string(), status: None } // retry
         };

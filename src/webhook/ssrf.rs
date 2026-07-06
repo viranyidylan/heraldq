@@ -40,15 +40,11 @@ pub fn find_in_chain<'a, T: std::error::Error + 'static>(
 /// Lets callers ask a `reqwest::Error` "were you actually an SSRF block in disguise?"
 /// the same way reqwest's own `is_connect()` / `is_timeout()` work.
 pub trait SsrfCheck {
-    fn ssrf_block(&self) -> bool;
-    fn get_ssrf(&self) -> Option<&SsrfError>;
+    fn ssrf_block(&self) -> Option<&SsrfError>;
 }
 
 impl SsrfCheck for reqwest::Error {
-    fn ssrf_block(&self) -> bool {
-        find_in_chain::<SsrfError>(self).is_some()
-    }
-    fn get_ssrf(&self) -> Option<&SsrfError> {
+    fn ssrf_block(&self) -> Option<&SsrfError> {
         find_in_chain::<SsrfError>(self)
     }
 }
@@ -244,7 +240,11 @@ mod tests {
             .await
             .expect_err("request to a blocked host must fail");
 
-        assert!(err.ssrf_block(), "expected an SSRF block, got: {err:?}");
-        assert_eq!(err.get_ssrf(), Some(&SsrfError::BlockedAddress));
+        // dispatch nests its SSRF check inside the `is_connect()` arm, so this
+        // coupling must hold: a resolver rejection *must* report is_connect().
+        // If a reqwest upgrade breaks it, blocked hosts get retried, not
+        // dead-lettered — so fail loudly here rather than silently in prod.
+        assert!(err.is_connect(), "SSRF block must surface as a connect error, got: {err:?}");
+        assert_eq!(err.ssrf_block(), Some(&SsrfError::BlockedAddress));
     }
 }

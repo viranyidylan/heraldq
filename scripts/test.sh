@@ -2,7 +2,7 @@
     -X POST \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer sliq_2c0451ae9deac74c5043c75ee3aecddf" \
-    -d '{"destination": "https://localhost:3000/v1/mock",
+    -d '{"destination": "https://httpbin.org/status/202",
           "payload": {
               "event": "order.created",
               "order_id": "ord_123abc",
