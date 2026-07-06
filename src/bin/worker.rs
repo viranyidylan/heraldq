@@ -1,8 +1,8 @@
 use graphile_worker::{self, LocalQueueConfig, RefetchDelayConfig};
 use reqwest::redirect;
-use sliq::{SendWebhook, WorkerState, config::AppConfig, db};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tracing::info;
+use sliq::{SendWebhook, WorkerState, config::AppConfig, db, webhook::ssrf::{self, policy}};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,13 +18,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pg_pool = db::create_pool(&config).await?;
     db::run_migrations(&pg_pool).await?;
 
+    let resolver = ssrf::SecureResolver {
+        acl: policy(),
+    };
+
+    let http_client = reqwest::Client::builder()
+        .redirect(redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(20))
+        .user_agent("HeraldQ/1.0")
+        .dns_resolver(Arc::new(resolver))
+        .no_proxy()
+        .build()?;
+
     let worker_state = WorkerState {
-        http_client: reqwest::Client::builder()
-            .redirect(redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(8))
-            .timeout(Duration::from_secs(30))
-            .user_agent("HeraldQ/1.0")
-            .build()?,
+        http_client,
         pg_pool: pg_pool.clone(),
     };
 
