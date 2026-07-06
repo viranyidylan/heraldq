@@ -3,7 +3,7 @@ use std::sync::Arc;
 use governor::{Quota, RateLimiter};
 use graphile_worker::WorkerUtils;
 use nonzero_ext::nonzero;
-use sliq::{AppState, config::AppConfig, db, routes};
+use sliq::{AppState, config::AppConfig, db, routes, webhook::ssrf};
 use tracing::info;
 
 #[tokio::main]
@@ -20,21 +20,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let utils = WorkerUtils::new(pg_pool.clone(), config.schema.clone());
 
-    let webhook_limiter = Arc::new(
-        // RateLimiter::keyed(Quota::per_minute(nonzero!(5u32)))
-        RateLimiter::direct(Quota::per_minute(nonzero!(1000u32)))
-    );
+    // Per-tenant burst limiter: one token bucket per tenant_id, 10 req/s each.
+    let webhook_limiter = Arc::new(RateLimiter::keyed(Quota::per_second(nonzero!(10u32))));
 
-    // let signup_limiter = Arc::new(
-    //     // RateLimiter::keyed(Quota::per_minute(nonzero!(5u32)))
-    //     RateLimiter::direct(Quota::per_minute(nonzero!(100u32)))
-    // );
+    // Global throttle on signup to limit invite-code abuse: 100/min across all clients.
+    let signup_limiter = Arc::new(RateLimiter::direct(Quota::per_minute(nonzero!(100u32))));
 
     let state = AppState {
         pg_pool,
         worker_utils: utils,
         schema: config.schema,
         webhook_limiter,
+        signup_limiter,
+        policy: ssrf::policy()
     };
 
     let app = routes::build(state);

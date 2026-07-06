@@ -1,0 +1,22 @@
+# Provisions the HeraldQ Postgres datasource so Grafana can read metrics
+# straight from the operational tables (webhook_deliveries, dead_letter_queue,
+# graphile_worker.jobs). Password comes from the POSTGRES_PASSWORD env var so it
+# is never committed. For local dev it points at the host Postgres; for Railway,
+# override the env vars (HOST/PORT/DB/USER/PASSWORD) to the public proxy values.
+apiVersion: 1
+
+datasources:
+  - name: HeraldQ-Postgres
+    uid: heraldq-pg
+    type: postgres
+    access: proxy
+    url: ${POSTGRES_HOST}:${POSTGRES_PORT}
+    user: ${POSTGRES_USER}
+    jsonData:
+      database: ${POSTGRES_DB}
+      sslmode: ${POSTGRES_SSLMODE}
+      postgresVersion: 1600
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    isDefault: true
+    editable: true

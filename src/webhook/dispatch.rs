@@ -5,7 +5,7 @@ use sha2::Sha256;
 type HmacSha256 = Hmac<Sha256>;
 use tracing::{error, info, warn};
 
-use crate::{db, SendWebhook, WorkerState};
+use crate::{db, webhook::ssrf::SsrfCheck, SendWebhook, WorkerState};
 
 #[derive(Debug)]
 enum Outcome {
@@ -81,6 +81,7 @@ impl TaskHandler for SendWebhook {
                 }
             },
             Err(e) if e.is_builder() => Outcome::PermaFail { reason: "reqwest builder error (check for bad URL, bad config).".to_string(), status: None },
+            Err(e) if e.ssrf_block() => Outcome::PermaFail { reason: format!("blocked by SSRF policy: {}", e.get_ssrf().unwrap()), status: None },
             Err(e) if e.is_connect() => Outcome::Retry { reason: "reqwest connection error".to_string(), status: None },
             Err(e) if e.is_timeout() => Outcome::Retry { reason: "reqwest timeout error".to_string(), status: None }, // retry
             Err(e)                   => Outcome::Retry { reason: e.to_string(), status: None } // retry

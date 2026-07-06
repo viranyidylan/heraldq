@@ -12,20 +12,22 @@ pub async fn insert(pool: &PgPool, webhook: &SendWebhook, job: &Job,
     let destination = webhook.destination.to_owned();
     let payload = serde_json::json!(webhook.payload);
     let enqueued_at = job.created_at();
+    let attempts = job.attempts();
 
     sqlx::query!(
         r#"INSERT INTO dead_letter_queue (
-            id, tenant_id, destination, payload, 
-            enqueued_at, failure_reason, status_code
-            ) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+            id, tenant_id, destination, payload,
+            enqueued_at, failure_reason, status_code, attempts
+            )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
         id,
         tenant_id,
         destination,
         payload,
-        enqueued_at, 
-        failure_reason, 
-        status_code
+        enqueued_at,
+        failure_reason,
+        status_code,
+        attempts
     )
     .execute(pool)
     .await?;
