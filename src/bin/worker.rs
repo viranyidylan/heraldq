@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     db::run_migrations(&pg_pool).await?;
 
     let resolver = ssrf::SecureResolver {
-        acl: policy(),
+        acl: Arc::new(policy()),
     };
 
     let http_client = reqwest::Client::builder()

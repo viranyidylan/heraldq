@@ -1,7 +1,8 @@
 use axum::BoxError;
-use http_acl::{HttpAcl, IpNet};
+use http_acl::HttpAcl;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use url::Host;
 
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -52,26 +53,17 @@ impl SsrfCheck for reqwest::Error {
     }
 }
 
+/// Egress IP policy: allow any global IP, deny the entire non-global set
+/// (loopback, RFC1918, link-local + cloud metadata, CGNAT, IPv6 ULA,
+/// documentation, reserved, ...) sourced from the stdlib's `is_global`.
+///
+/// These are the only two fields `is_ip_allowed` reads, and `is_ip_allowed`
+/// is the only ACL surface we consume — scheme and credential rejection live
+/// in `validate_destination`, not here.
 pub fn policy() -> HttpAcl {
     HttpAcl::builder()
-        .https(true)
-        // The crux: deny every non-global range (private, loopback, link-local,
-        // CGNAT, ULA, documentation, etc.). This replaces a hand-rolled CIDR table.
-        .non_global_ip_ranges(false)
-        // "Any destination": allow hosts and global IPs unless explicitly denied.
-        .host_acl_default(true)
-        .ip_acl_default(true)
-        // Ports: lock to 80/443. For truly-any port, use .port_acl_default(true)
-        // instead and drop the two allow ranges below.
-        .port_acl_default(false)
-        // Belt-and-suspenders explicit denies. non_global already covers these,
-        // but being explicit documents intent and survives config drift.
-        .add_denied_ip_range("169.254.0.0/16".parse::<IpNet>().unwrap()) // link-local + cloud metadata
-        .expect("valid cidr")
-        .add_denied_ip_range("100.64.0.0/10".parse::<IpNet>().unwrap()) // CGNAT
-        .expect("valid cidr")
-        .add_denied_ip_range("fc00::/7".parse::<IpNet>().unwrap()) // IPv6 ULA
-        .expect("valid cidr")
+        .non_global_ip_ranges(false) // deny every non-global range
+        .ip_acl_default(true) // allow any global IP not explicitly denied
         .build()
 }
 
@@ -103,29 +95,33 @@ pub fn validate_destination(acl: &HttpAcl, raw: &str) -> Result<(), SsrfError> {
     Ok(())
 }
 
+/// Reject the whole resolution if *any* resolved address is denied. A split DNS
+/// answer mixing a public and a private IP is treated as hostile — this is the
+/// check that defeats DNS rebinding at connect time, after registration.
+fn screen_addrs(acl: &HttpAcl, addrs: &[SocketAddr]) -> Result<(), SsrfError> {
+    for a in addrs {
+        if acl.is_ip_allowed(&a.ip()).is_denied() {
+            return Err(SsrfError::BlockedAddress);
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct SecureResolver {
-    pub acl: HttpAcl,
+    pub acl: Arc<HttpAcl>,
 }
 
 impl Resolve for SecureResolver {
     fn resolve(&self, name: Name) -> Resolving {
-        let policy = self.acl.clone(); 
+        let acl = self.acl.clone(); // refcount bump, not a deep copy of the ACL
         Box::pin(async move {
             let addrs: Vec<SocketAddr> = tokio::net::lookup_host((name.as_str(), 0))
                 .await
                 .map_err(|e| Box::new(e) as BoxError)?
                 .collect();
 
-            // If any returned address is disallowed, reject the
-            // entire resolution. Treats split results as hostile
-            for a in &addrs {
-                if policy.is_ip_allowed(&a.ip()).is_denied() {
-                    // return Err(format!("found disallowed IP in hostname, rejecting request").into())
-                    return Err(SsrfError::BlockedAddress.into())
-                }
-
-            }
+            screen_addrs(&acl, &addrs)?;
 
             Ok(Box::new(addrs.into_iter()) as Addrs)
         })
@@ -188,5 +184,44 @@ mod tests {
                 expected
             )
         }
+    }
+
+    fn sa(ip: &str) -> SocketAddr {
+        SocketAddr::new(ip.parse().unwrap(), 443)
+    }
+
+    #[test]
+    fn screen_addrs_allows_all_public() {
+        let acl = policy();
+        assert_eq!(screen_addrs(&acl, &[sa("1.1.1.1"), sa("93.184.216.34")]), Ok(()));
+    }
+
+    #[test]
+    fn screen_addrs_rejects_all_private() {
+        let acl = policy();
+        assert_eq!(
+            screen_addrs(&acl, &[sa("127.0.0.1")]),
+            Err(SsrfError::BlockedAddress)
+        );
+    }
+
+    #[test]
+    fn screen_addrs_rejects_metadata_ip() {
+        let acl = policy();
+        assert_eq!(
+            screen_addrs(&acl, &[sa("169.254.169.254")]),
+            Err(SsrfError::BlockedAddress)
+        );
+    }
+
+    // The DNS-rebinding defense: one public IP alongside one private IP must
+    // sink the *entire* resolution, not just filter the bad address out.
+    #[test]
+    fn screen_addrs_rejects_split_answer() {
+        let acl = policy();
+        assert_eq!(
+            screen_addrs(&acl, &[sa("1.1.1.1"), sa("169.254.169.254")]),
+            Err(SsrfError::BlockedAddress)
+        );
     }
 }
