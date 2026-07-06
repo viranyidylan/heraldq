@@ -224,4 +224,27 @@ mod tests {
             Err(SsrfError::BlockedAddress)
         );
     }
+
+    // End-to-end: a blocked destination must surface as a *recognizable* SSRF
+    // block through reqwest's error wrapping — dispatch's control flow hinges
+    // on `ssrf_block()` returning true (else it silently retries a blocked
+    // host instead of dead-lettering it). `localhost` resolves offline to
+    // 127.0.0.1/::1 and, being a hostname not an IP literal, actually goes
+    // through our resolver — an IP literal would skip resolution entirely.
+    #[tokio::test]
+    async fn blocked_host_surfaces_as_recognized_ssrf_block() {
+        let client = reqwest::Client::builder()
+            .dns_resolver(Arc::new(SecureResolver { acl: Arc::new(policy()) }))
+            .build()
+            .unwrap();
+
+        let err = client
+            .get("https://localhost/")
+            .send()
+            .await
+            .expect_err("request to a blocked host must fail");
+
+        assert!(err.ssrf_block(), "expected an SSRF block, got: {err:?}");
+        assert_eq!(err.get_ssrf(), Some(&SsrfError::BlockedAddress));
+    }
 }
