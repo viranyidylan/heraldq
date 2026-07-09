@@ -9,9 +9,9 @@ pub mod quotas;
 pub mod stats;
 pub mod tenants;
 
-pub async fn create_pool(config: &AppConfig) -> Result<PgPool, sqlx::Error> {
+pub async fn create_pool(config: &AppConfig, max_connections: u32) -> Result<PgPool, sqlx::Error> {
     let pg_pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(max_connections)
         .connect(config.database_url.as_ref())
         .await?;
 
