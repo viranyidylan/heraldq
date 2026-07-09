@@ -12,7 +12,13 @@ pub struct PendingJob {
     pub run_at: DateTime<Utc>,
 }
 
-/// Look up an in-flight job by the webhook id we stamped into its payload.
+/// Look up an in-flight job by its job key — enqueue stamps the webhook ULID
+/// into graphile's `key` column, which carries a unique index, so this is a
+/// single-row index lookup instead of a payload scan over the whole (hot)
+/// jobs table. The tenant check still reads the payload, but only on the one
+/// row the key already selected — a tenant mismatch means the id belongs to
+/// someone else and must 404, exactly like a missing row.
+///
 /// Reads graphile_worker._private_jobs because the public jobs view omits
 /// payload — coupled to graphile internals; re-verify on upgrades (same
 /// caveat as db::stats::count_jobs_queued_today).
@@ -26,7 +32,7 @@ pub async fn find_by_webhook_id(
         r#"SELECT payload->>'destination' AS "destination!",
             attempts, max_attempts, last_error, created_at, run_at
         FROM graphile_worker._private_jobs
-        WHERE payload->>'id' = $1 AND payload->>'tenant_id' = $2"#,
+        WHERE key = $1 AND payload->>'tenant_id' = $2"#,
         webhook_id,
         tenant_id.to_string(),
     )
