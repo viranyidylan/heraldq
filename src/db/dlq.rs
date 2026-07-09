@@ -56,6 +56,23 @@ pub async fn insert(
     Ok(())
 }
 
+pub async fn find_by_id(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    webhook_id: &str,
+) -> Result<Option<DlqEntry>, sqlx::Error> {
+    sqlx::query_as!(
+        DlqEntry,
+        r#"SELECT id, destination, payload, failure_reason, status_code, attempts,
+            enqueued_at, abandoned_at
+        FROM dead_letter_queue WHERE tenant_id = $1 AND id = $2"#,
+        tenant_id,
+        webhook_id,
+    )
+    .fetch_optional(pool)
+    .await
+}
+
 pub async fn count_dlq_total(pool: &PgPool, tenant_id: Uuid) -> Result<i64, sqlx::Error> {
     let count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) "count!" FROM dead_letter_queue WHERE tenant_id = $1"#,

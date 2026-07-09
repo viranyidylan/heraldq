@@ -14,6 +14,8 @@ pub enum AppError {
     MonthlyQuotaExceeded,
     #[error("unauthorized")]
     Unauthorized,
+    #[error("not found")]
+    NotFound,
     // generic 5xx bucket — real cause logged, never in the response body
     #[error("internal server error")]
     Internal(#[from] sqlx::Error),
@@ -43,6 +45,7 @@ impl IntoResponse for AppError {
                 "monthly webhook quota exceeded",
             ),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
+            Self::NotFound => (StatusCode::NOT_FOUND, "not found"),
             Self::Internal(ref e) => {
                 error!(error = ?e, "internal server error");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")

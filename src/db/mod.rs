@@ -4,6 +4,7 @@ use crate::config::AppConfig;
 
 pub mod deliveries;
 pub mod dlq;
+pub mod jobs;
 pub mod quotas;
 pub mod stats;
 pub mod tenants;
