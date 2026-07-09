@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, destination, payload, failure_reason, status_code, attempts,\n            enqueued_at, abandoned_at\n        FROM dead_letter_queue WHERE tenant_id = $1 AND id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "destination",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "failure_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "status_code",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 5,
+        "name": "attempts",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 6,
+        "name": "enqueued_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "abandoned_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "48e95fead185434ee2415ce823aa1ed4ecf12fb829ed9707761a8235750eabf8"
+}

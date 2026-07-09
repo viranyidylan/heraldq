@@ -1,6 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{self, FromRef, Query, State},
+    extract::{self, FromRef, Path, Query, State},
     response::Html,
     routing::{get, post},
 };
@@ -34,6 +34,7 @@ struct HealthCheckResponse {
 pub fn build(state: AppState) -> Router {
     let v1 = Router::new()
         .route("/webhook", post(enqueue_webhook))
+        .route("/webhook/{id}", get(webhook_status))
         .route("/signup", post(signup))
         .route("/mock", post(mock))
         .route("/dlq", get(dlq))
@@ -175,9 +176,9 @@ async fn dashboard(
     Ok(Html(crate::views::render_dashboard(&counts)))
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Serialize)]
 struct DeadLetterResponse {
-    messages: Vec<WebhookRequest>,
+    messages: Vec<crate::db::dlq::DlqEntry>,
     dlq_total: i64,
     limit: i64,
     offset: i64,
@@ -215,6 +216,104 @@ async fn dlq(
     }))
 }
 
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum WebhookStatusResponse {
+    Delivered {
+        id: String,
+        destination: String,
+        status_code: Option<i16>,
+        attempts: Option<i16>,
+        enqueued_at: chrono::DateTime<Utc>,
+        delivered_at: chrono::DateTime<Utc>,
+    },
+    Failed {
+        id: String,
+        destination: String,
+        failure_reason: Option<String>,
+        status_code: Option<i16>,
+        attempts: Option<i16>,
+        enqueued_at: chrono::DateTime<Utc>,
+        abandoned_at: chrono::DateTime<Utc>,
+    },
+    Pending {
+        id: String,
+        destination: String,
+        attempts: i16,
+        max_attempts: i16,
+        last_error: Option<String>,
+        enqueued_at: chrono::DateTime<Utc>,
+        next_attempt_at: chrono::DateTime<Utc>,
+    },
+}
+
+impl From<crate::db::deliveries::DeliveryRecord> for WebhookStatusResponse {
+    fn from(d: crate::db::deliveries::DeliveryRecord) -> Self {
+        Self::Delivered {
+            id: d.id,
+            destination: d.destination,
+            status_code: d.status_code,
+            attempts: d.attempts,
+            enqueued_at: d.enqueued_at,
+            delivered_at: d.delivered_at,
+        }
+    }
+}
+
+impl From<crate::db::dlq::DlqEntry> for WebhookStatusResponse {
+    fn from(f: crate::db::dlq::DlqEntry) -> Self {
+        Self::Failed {
+            id: f.id,
+            destination: f.destination,
+            failure_reason: f.failure_reason,
+            status_code: f.status_code,
+            attempts: f.attempts,
+            enqueued_at: f.enqueued_at,
+            abandoned_at: f.abandoned_at,
+        }
+    }
+}
+
+async fn webhook_status(
+    State(state): State<AppState>,
+    api_key: auth::ValidApiKey,
+    Path(webhook_id): Path<String>,
+) -> Result<Json<WebhookStatusResponse>, AppError> {
+    let pool = &state.pg_pool;
+    let tenant_id = api_key.tenant_id;
+
+    // Terminal states first — once written they never change.
+    if let Some(d) = crate::db::deliveries::find_by_id(pool, tenant_id, &webhook_id).await? {
+        return Ok(Json(d.into()));
+    }
+    if let Some(f) = crate::db::dlq::find_by_id(pool, tenant_id, &webhook_id).await? {
+        return Ok(Json(f.into()));
+    }
+    if let Some(p) = crate::db::jobs::find_by_webhook_id(pool, tenant_id, &webhook_id).await? {
+        return Ok(Json(WebhookStatusResponse::Pending {
+            id: webhook_id,
+            destination: p.destination,
+            attempts: p.attempts,
+            max_attempts: p.max_attempts,
+            last_error: p.last_error,
+            enqueued_at: p.created_at,
+            next_attempt_at: p.run_at,
+        }));
+    }
+
+    // The job may have reached a terminal state between the checks above and
+    // the queue lookup (the terminal row is committed before the job row is
+    // deleted) — re-check the terminal stores once before declaring 404.
+    if let Some(d) = crate::db::deliveries::find_by_id(pool, tenant_id, &webhook_id).await? {
+        return Ok(Json(d.into()));
+    }
+    if let Some(f) = crate::db::dlq::find_by_id(pool, tenant_id, &webhook_id).await? {
+        return Ok(Json(f.into()));
+    }
+
+    Err(AppError::NotFound)
+}
+
 async fn mock(State(_state): State<AppState>) -> StatusCode {
     let roll = rand::rng().random_range(0..100);
 
@@ -236,4 +335,29 @@ async fn mock(State(_state): State<AppState>) -> StatusCode {
 
     debug!(roll, status = status.as_u16(), "Mock endpoint hit");
     status
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The `status` tag and snake_case variant names are the public API
+    // contract for GET /webhook/{id} — a rename here breaks customers.
+    #[test]
+    fn webhook_status_serializes_with_status_tag() {
+        let now = Utc::now();
+        let pending = WebhookStatusResponse::Pending {
+            id: "01TEST".into(),
+            destination: "https://example.com".into(),
+            attempts: 3,
+            max_attempts: 15,
+            last_error: Some("500 Internal Server Error".into()),
+            enqueued_at: now,
+            next_attempt_at: now,
+        };
+        let json = serde_json::to_value(&pending).unwrap();
+        assert_eq!(json["status"], "pending");
+        assert_eq!(json["attempts"], 3);
+        assert_eq!(json["last_error"], "500 Internal Server Error");
+    }
 }

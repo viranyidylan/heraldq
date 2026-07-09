@@ -1,8 +1,25 @@
+use chrono::{DateTime, Utc};
 use graphile_worker::Job;
+use serde::Serialize;
+use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::{SendWebhook, WebhookRequest};
+use crate::SendWebhook;
+
+/// A dead-lettered webhook as shown to the tenant: everything they need to
+/// diagnose the failure and decide what to do about it.
+#[derive(Debug, Serialize)]
+pub struct DlqEntry {
+    pub id: String,
+    pub destination: String,
+    pub payload: Value,
+    pub failure_reason: Option<String>,
+    pub status_code: Option<i16>,
+    pub attempts: Option<i16>,
+    pub enqueued_at: DateTime<Utc>,
+    pub abandoned_at: DateTime<Utc>,
+}
 
 pub async fn insert(
     pool: &PgPool,
@@ -39,6 +56,23 @@ pub async fn insert(
     Ok(())
 }
 
+pub async fn find_by_id(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    webhook_id: &str,
+) -> Result<Option<DlqEntry>, sqlx::Error> {
+    sqlx::query_as!(
+        DlqEntry,
+        r#"SELECT id, destination, payload, failure_reason, status_code, attempts,
+            enqueued_at, abandoned_at
+        FROM dead_letter_queue WHERE tenant_id = $1 AND id = $2"#,
+        tenant_id,
+        webhook_id,
+    )
+    .fetch_optional(pool)
+    .await
+}
+
 pub async fn count_dlq_total(pool: &PgPool, tenant_id: Uuid) -> Result<i64, sqlx::Error> {
     let count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) "count!" FROM dead_letter_queue WHERE tenant_id = $1"#,
@@ -55,15 +89,17 @@ pub async fn list_page(
     tenant_id: &Uuid,
     limit: i64,
     offset: i64,
-) -> Result<Vec<WebhookRequest>, sqlx::Error> {
-    let messages = sqlx::query_as(
-        r#"SELECT destination, payload, failure_reason, status_code 
-        FROM dead_letter_queue WHERE tenant_id = $1 
+) -> Result<Vec<DlqEntry>, sqlx::Error> {
+    let messages = sqlx::query_as!(
+        DlqEntry,
+        r#"SELECT id, destination, payload, failure_reason, status_code, attempts,
+            enqueued_at, abandoned_at
+        FROM dead_letter_queue WHERE tenant_id = $1
         ORDER BY abandoned_at DESC, id DESC LIMIT $2 OFFSET $3"#,
+        tenant_id,
+        limit,
+        offset,
     )
-    .bind(tenant_id)
-    .bind(limit)
-    .bind(offset)
     .fetch_all(pool)
     .await?;
 
