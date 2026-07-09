@@ -3,7 +3,7 @@ use std::sync::Arc;
 use governor::{Quota, RateLimiter};
 use graphile_worker::WorkerUtils;
 use nonzero_ext::nonzero;
-use sliq::{AppState, config::AppConfig, db, routes, webhook::ssrf};
+use sliq::{AppState, config::AppConfig, db, routes, telemetry, webhook::ssrf};
 use tracing::info;
 
 /// API queries are short (auth lookup, quota bump, enqueue, list pages);
@@ -13,9 +13,8 @@ const API_POOL_SIZE: u32 = 10;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    telemetry::init_tracing();
+    telemetry::init_metrics()?;
 
     let config = AppConfig::from_env()?;
 

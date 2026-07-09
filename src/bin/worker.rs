@@ -3,7 +3,7 @@ use reqwest::redirect;
 use sliq::{
     SendWebhook, WorkerState,
     config::AppConfig,
-    db,
+    db, telemetry,
     webhook::ssrf::{self, policy},
 };
 use std::{sync::Arc, time::Duration};
@@ -21,9 +21,8 @@ const WORKER_POOL_SIZE: u32 = WORKER_CONCURRENCY as u32 + 4;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    telemetry::init_tracing();
+    telemetry::init_metrics()?;
 
     info!("Worker spinning up");
 
