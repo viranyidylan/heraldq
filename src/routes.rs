@@ -16,7 +16,6 @@ use crate::{
     AppState, WebhookRequest, auth,
     db::stats::WebhookActivitySummary,
     error::AppError,
-    queue::TenantQueue,
     webhook::{self, ssrf::validate_destination},
 };
 
@@ -162,12 +161,7 @@ async fn webhook_activity_summary(
     State(state): State<AppState>,
     api_key: auth::ValidApiKey,
 ) -> Result<Json<WebhookActivitySummary>, AppError> {
-    let summary = crate::db::stats::activity_summary(
-        &state.pg_pool,
-        api_key.tenant_id,
-        &TenantQueue::for_tenant(api_key.tenant_id),
-    )
-    .await?;
+    let summary = crate::db::stats::activity_summary(&state.pg_pool, api_key.tenant_id).await?;
 
     Ok(Json(summary))
 }
@@ -176,12 +170,7 @@ async fn dashboard(
     State(state): State<AppState>,
     api_key: auth::ValidApiKey,
 ) -> Result<Html<String>, AppError> {
-    let counts = crate::db::stats::activity_summary(
-        &state.pg_pool,
-        api_key.tenant_id,
-        &TenantQueue::for_tenant(api_key.tenant_id),
-    )
-    .await?;
+    let counts = crate::db::stats::activity_summary(&state.pg_pool, api_key.tenant_id).await?;
 
     Ok(Html(crate::views::render_dashboard(&counts)))
 }
