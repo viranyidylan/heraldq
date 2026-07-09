@@ -3,6 +3,7 @@ use graphile_worker::Job;
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::PgPool;
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::SendWebhook;
@@ -35,12 +36,18 @@ pub async fn insert(
     let enqueued_at = job.created_at();
     let attempts = job.attempts();
 
-    sqlx::query!(
+    // Idempotent under at-least-once job execution: a crash between this
+    // insert and graphile marking the job done re-runs the job with the same
+    // ULID. Without ON CONFLICT the re-run would hit the primary key, error,
+    // and retry forever. First write wins — the re-run's failure details
+    // describe the same terminal outcome, so nothing is lost by dropping them.
+    let result = sqlx::query!(
         r#"INSERT INTO dead_letter_queue (
             id, tenant_id, destination, payload,
             enqueued_at, failure_reason, status_code, attempts
             )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (id) DO NOTHING"#,
         id,
         tenant_id,
         destination,
@@ -52,6 +59,10 @@ pub async fn insert(
     )
     .execute(pool)
     .await?;
+
+    if result.rows_affected() == 0 {
+        warn!(webhook_id = %id, "DLQ entry already recorded — job re-ran after a crash window");
+    }
 
     Ok(())
 }

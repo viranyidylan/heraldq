@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use graphile_worker::Job;
 use serde::Serialize;
 use sqlx::PgPool;
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::SendWebhook;
@@ -76,11 +77,17 @@ pub async fn insert(
     let enqueued_at = job.created_at();
     let attempts = job.attempts();
 
-    sqlx::query!(
+    // Idempotent under at-least-once job execution: if the worker crashes
+    // after this insert but before graphile marks the job complete, the job
+    // re-runs and lands here again with the same ULID. A plain INSERT would
+    // hit the primary key and error the job forever (a poison loop); DO
+    // NOTHING makes the re-run converge on the already-recorded outcome.
+    let result = sqlx::query!(
         r#"INSERT INTO webhook_deliveries (
             id, tenant_id, destination, payload, enqueued_at, status_code, attempts
             )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (id) DO NOTHING"#,
         id,
         tenant_id,
         destination,
@@ -91,6 +98,10 @@ pub async fn insert(
     )
     .execute(pool)
     .await?;
+
+    if result.rows_affected() == 0 {
+        warn!(webhook_id = %id, "delivery already recorded — job re-ran after a crash window");
+    }
 
     Ok(())
 }
