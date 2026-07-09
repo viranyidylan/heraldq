@@ -5,7 +5,7 @@ use sha2::Sha256;
 type HmacSha256 = Hmac<Sha256>;
 use tracing::{error, info, warn};
 
-use crate::{db, webhook::ssrf::SsrfCheck, SendWebhook, WorkerState};
+use crate::{SendWebhook, WorkerState, db, webhook::ssrf::SsrfCheck};
 
 #[derive(Debug)]
 enum Outcome {
@@ -20,7 +20,7 @@ pub enum DispatchError {
     MissingState,
 
     #[error("retryable error")]
-    Retryable{ reason: String, status: Option<u16> },
+    Retryable { reason: String, status: Option<u16> },
 
     #[error("database error")]
     Database(#[from] sqlx::Error),
@@ -53,14 +53,14 @@ impl TaskHandler for SendWebhook {
         let http_client = &app_state.http_client;
         let pg_pool = &app_state.pg_pool;
 
-        let body_as_bytes = serde_json::to_vec(&self.payload)
-            .map_err(|e| DispatchError::Serialization(e))?;
+        let body_as_bytes =
+            serde_json::to_vec(&self.payload).map_err(DispatchError::Serialization)?;
 
         let timestamp_utc = Utc::now().timestamp().to_string();
         let secret = db::tenants::get_hmac_secret(pg_pool, self.tenant_id).await?;
         let hex_sig = sign_bytes(secret.as_bytes(), &timestamp_utc, &body_as_bytes);
         let signature_header = format!("t={},v1={}", timestamp_utc, hex_sig);
-        
+
         let res = http_client
             .post(&self.destination)
             .header("Content-Type", "application/json")
@@ -104,9 +104,17 @@ impl TaskHandler for SendWebhook {
                 warn!(webhook_id = %self.id, job_id = %job_id, reason = %reason, "Retryable failure, will retry");
                 if attempts >= job.max_attempts() {
                     info!("[TRACER BULLET] Max retries exhausted, adding to dlq");
-                    if let Err(db_err) = db::dlq::insert(pg_pool, &self, job, Some("Retries exhausted".to_string()), status.map(|s| s as i16)).await {
+                    if let Err(db_err) = db::dlq::insert(
+                        pg_pool,
+                        &self,
+                        job,
+                        Some("Retries exhausted".to_string()),
+                        status.map(|s| s as i16),
+                    )
+                    .await
+                    {
                         error!(webhook_id = %self.id,
-                            job_id = %job_id, 
+                            job_id = %job_id,
                             error = ?db_err,
                             "[CRITICAL ERROR] Failed to write exhausted job to DLQ"
                         );
@@ -117,9 +125,12 @@ impl TaskHandler for SendWebhook {
             }
             Outcome::PermaFail { reason, status } => {
                 warn!(webhook_id = %self.id, job_id = %job_id, reason = %reason, "Permanent failure, dead-lettering");
-                if let Err(db_err) = db::dlq::insert(pg_pool, &self, job, Some(reason), status.map(|s| s as i16)).await {
+                if let Err(db_err) =
+                    db::dlq::insert(pg_pool, &self, job, Some(reason), status.map(|s| s as i16))
+                        .await
+                {
                     error!(webhook_id = %self.id,
-                        job_id = %job_id, 
+                        job_id = %job_id,
                         error = ?db_err,
                         "[CRITICAL ERROR] Failed to write perma-fail job to DLQ"
                     );
@@ -132,8 +143,7 @@ impl TaskHandler for SendWebhook {
 }
 
 pub fn sign_bytes(secret: &[u8], timestamp_utc: &str, body_as_bytes: &[u8]) -> String {
-    let mut mac = HmacSha256::new_from_slice(secret)
-        .expect("HMAC can take key of any size");
+    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size");
     mac.update(timestamp_utc.as_bytes());
     mac.update(b".");
     mac.update(body_as_bytes);

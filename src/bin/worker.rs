@@ -1,8 +1,13 @@
 use graphile_worker::{self, LocalQueueConfig, RefetchDelayConfig};
 use reqwest::redirect;
+use sliq::{
+    SendWebhook, WorkerState,
+    config::AppConfig,
+    db,
+    webhook::ssrf::{self, policy},
+};
 use std::{sync::Arc, time::Duration};
 use tracing::info;
-use sliq::{SendWebhook, WorkerState, config::AppConfig, db, webhook::ssrf::{self, policy}};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

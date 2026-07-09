@@ -1,6 +1,6 @@
 use sqlx::PgPool;
 
-use crate::{config::AppConfig};
+use crate::config::AppConfig;
 
 pub mod deliveries;
 pub mod dlq;
@@ -18,9 +18,7 @@ pub async fn create_pool(config: &AppConfig) -> Result<PgPool, sqlx::Error> {
 }
 
 pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
-    sqlx::migrate!("./migrations")
-        .run(pool)
-        .await?;
+    sqlx::migrate!("./migrations").run(pool).await?;
 
     Ok(())
 }

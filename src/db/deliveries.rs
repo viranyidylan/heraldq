@@ -1,9 +1,14 @@
 use graphile_worker::Job;
-use sqlx::{PgPool};
+use sqlx::PgPool;
 
 use crate::SendWebhook;
 
-pub async fn insert(pool: &PgPool, webhook: SendWebhook, job: &Job, status_code: Option<i16>) -> Result<(), sqlx::Error> {
+pub async fn insert(
+    pool: &PgPool,
+    webhook: SendWebhook,
+    job: &Job,
+    status_code: Option<i16>,
+) -> Result<(), sqlx::Error> {
     let id = webhook.id;
     let tenant_id = webhook.tenant_id;
     let destination = webhook.destination;

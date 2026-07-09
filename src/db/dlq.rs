@@ -4,8 +4,12 @@ use uuid::Uuid;
 
 use crate::{SendWebhook, WebhookRequest};
 
-pub async fn insert(pool: &PgPool, webhook: &SendWebhook, job: &Job, 
-    failure_reason: Option<String>, status_code: Option<i16>
+pub async fn insert(
+    pool: &PgPool,
+    webhook: &SendWebhook,
+    job: &Job,
+    failure_reason: Option<String>,
+    status_code: Option<i16>,
 ) -> Result<(), sqlx::Error> {
     let id = webhook.id.to_owned();
     let tenant_id = webhook.tenant_id;

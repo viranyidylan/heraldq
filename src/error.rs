@@ -31,16 +31,17 @@ pub enum AppError {
 
     // --- destination / url hygiene ---
     #[error("invalid destination")]
-    InvalidDestination(#[from] SsrfError)
+    InvalidDestination(#[from] SsrfError),
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match self {
             Self::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, "too many requests"),
-            Self::MonthlyQuotaExceeded => {
-                (StatusCode::TOO_MANY_REQUESTS, "monthly webhook quota exceeded")
-            }
+            Self::MonthlyQuotaExceeded => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "monthly webhook quota exceeded",
+            ),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::Internal(ref e) => {
                 error!(error = ?e, "internal server error");

@@ -65,11 +65,11 @@ where
         .await?
         .ok_or(AppError::Unauthorized)?;
 
-        if let Some(expires_at) = row.expires_at {
-            if expires_at < chrono::Utc::now() {
-                warn!(api_key_id = %row.id, "Expired API key used");
-                return Err(AppError::Unauthorized);
-            }
+        if let Some(expires_at) = row.expires_at
+            && expires_at < chrono::Utc::now()
+        {
+            warn!(api_key_id = %row.id, "Expired API key used");
+            return Err(AppError::Unauthorized);
         }
 
         Ok(ValidApiKey {
@@ -86,7 +86,10 @@ mod tests {
     #[test]
     fn missing_auth_header_is_unauthorized() {
         let headers = http::HeaderMap::new();
-        assert!(matches!(extract_bearer_token(&headers), Err(AppError::Unauthorized)));
+        assert!(matches!(
+            extract_bearer_token(&headers),
+            Err(AppError::Unauthorized)
+        ));
     }
 
     #[test]
@@ -96,7 +99,10 @@ mod tests {
             http::header::AUTHORIZATION,
             http::HeaderValue::from_static("Basic dXNlcjpwYXNz"),
         );
-        assert!(matches!(extract_bearer_token(&headers), Err(AppError::Unauthorized)));
+        assert!(matches!(
+            extract_bearer_token(&headers),
+            Err(AppError::Unauthorized)
+        ));
     }
 
     #[test]

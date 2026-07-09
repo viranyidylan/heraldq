@@ -71,19 +71,19 @@ pub fn validate_destination(acl: &HttpAcl, raw: &str) -> Result<(), SsrfError> {
     }
 
     if !url.username().is_empty() || url.password().is_some() {
-        return Err(SsrfError::HasCredentials)
+        return Err(SsrfError::HasCredentials);
     }
 
     match url.host() {
         Some(Host::Ipv4(ip)) => {
             if acl.is_ip_allowed(&ip.into()).is_denied() {
                 return Err(SsrfError::BlockedAddress);
-            }   
+            }
         }
         Some(Host::Ipv6(ip)) => {
             if acl.is_ip_allowed(&ip.into()).is_denied() {
                 return Err(SsrfError::BlockedAddress);
-            }   
+            }
         }
         Some(Host::Domain(_)) => (),
         None => return Err(SsrfError::MissingHost),
@@ -141,14 +141,14 @@ mod tests {
 
         // The classic targets attackers reach for.
         let blocked = [
-            "https://169.254.169.254/latest/meta-data/",   // cloud metadata endpoint
-            "https://2130706433/",                         // decimal for 127.0.0.1
-            "https://0x7f.0.0.1/",                         // hex octet
-            "https://0177.0.0.1/",                         // octal octet
-            "https://10.0.0.1/",                           // RFC1918 private
-            "https://192.168.1.1/",                        // RFC1918 private
-            "https://[::1]/",                              // IPv6 loopback
-            "https://[fe80::1]/",                          // IPv6 link-local
+            "https://169.254.169.254/latest/meta-data/", // cloud metadata endpoint
+            "https://2130706433/",                       // decimal for 127.0.0.1
+            "https://0x7f.0.0.1/",                       // hex octet
+            "https://0177.0.0.1/",                       // octal octet
+            "https://10.0.0.1/",                         // RFC1918 private
+            "https://192.168.1.1/",                      // RFC1918 private
+            "https://[::1]/",                            // IPv6 loopback
+            "https://[fe80::1]/",                        // IPv6 link-local
         ];
 
         for raw in blocked {
@@ -165,20 +165,20 @@ mod tests {
         let acl = policy();
 
         let cases = vec![
-            ("/api/v1/users",                Err(SsrfError::BadUrl)),
-            ("http://my-website.com",        Err(SsrfError::NotHttps)),
-            ("gopher://surprise-attack",     Err(SsrfError::NotHttps)),
-            ("https://user:pw@example.com",  Err(SsrfError::HasCredentials)),
-            ("https://2130706433/",          Err(SsrfError::BlockedAddress)),
-            ("https://example.com",          Ok(()) ),
-            ("https://93.184.216.34",        Ok(()) ),
+            ("/api/v1/users", Err(SsrfError::BadUrl)),
+            ("http://my-website.com", Err(SsrfError::NotHttps)),
+            ("gopher://surprise-attack", Err(SsrfError::NotHttps)),
+            (
+                "https://user:pw@example.com",
+                Err(SsrfError::HasCredentials),
+            ),
+            ("https://2130706433/", Err(SsrfError::BlockedAddress)),
+            ("https://example.com", Ok(())),
+            ("https://93.184.216.34", Ok(())),
         ];
 
         for (url, expected) in cases {
-            assert_eq!(
-                validate_destination(&acl, url),
-                expected
-            )
+            assert_eq!(validate_destination(&acl, url), expected)
         }
     }
 
@@ -189,7 +189,10 @@ mod tests {
     #[test]
     fn screen_addrs_allows_all_public() {
         let acl = policy();
-        assert_eq!(screen_addrs(&acl, &[sa("1.1.1.1"), sa("93.184.216.34")]), Ok(()));
+        assert_eq!(
+            screen_addrs(&acl, &[sa("1.1.1.1"), sa("93.184.216.34")]),
+            Ok(())
+        );
     }
 
     #[test]
@@ -230,7 +233,9 @@ mod tests {
     #[tokio::test]
     async fn blocked_host_surfaces_as_recognized_ssrf_block() {
         let client = reqwest::Client::builder()
-            .dns_resolver(Arc::new(SecureResolver { acl: Arc::new(policy()) }))
+            .dns_resolver(Arc::new(SecureResolver {
+                acl: Arc::new(policy()),
+            }))
             .build()
             .unwrap();
 
@@ -244,7 +249,10 @@ mod tests {
         // coupling must hold: a resolver rejection *must* report is_connect().
         // If a reqwest upgrade breaks it, blocked hosts get retried, not
         // dead-lettered — so fail loudly here rather than silently in prod.
-        assert!(err.is_connect(), "SSRF block must surface as a connect error, got: {err:?}");
+        assert!(
+            err.is_connect(),
+            "SSRF block must surface as a connect error, got: {err:?}"
+        );
         assert_eq!(err.ssrf_block(), Some(&SsrfError::BlockedAddress));
     }
 }

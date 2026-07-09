@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         schema: config.schema,
         webhook_limiter,
         signup_limiter,
-        policy: ssrf::policy()
+        policy: ssrf::policy(),
     };
 
     let app = routes::build(state);

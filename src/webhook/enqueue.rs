@@ -7,13 +7,14 @@ use crate::{SendWebhook, WebhookRequest, queue::TenantQueue};
 pub async fn enqueue(
     utils: &WorkerUtils,
     tenant_id: Uuid,
-    request_body: WebhookRequest
-) -> Result<(), GraphileWorkerError> {
+    request_body: WebhookRequest,
+) -> Result<String, GraphileWorkerError> {
     let tenant_queue = TenantQueue::for_tenant(tenant_id);
+    let webhook_id = Ulid::new().to_string();
     utils
         .add_job(
             SendWebhook {
-                id: Ulid::new().to_string(),
+                id: webhook_id.to_owned(),
                 tenant_id,
                 destination: request_body.destination.to_string(),
                 payload: request_body.payload,
@@ -28,5 +29,5 @@ pub async fn enqueue(
                 .build(),
         )
         .await?;
-    Ok(())
+    Ok(webhook_id)
 }

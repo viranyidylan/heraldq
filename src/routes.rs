@@ -13,7 +13,11 @@ use sqlx::PgPool;
 use tracing::{debug, info};
 
 use crate::{
-    AppState, WebhookRequest, auth, db::stats::WebhookActivitySummary, error::AppError, queue::TenantQueue, webhook::{self, ssrf::validate_destination},
+    AppState, WebhookRequest, auth,
+    db::stats::WebhookActivitySummary,
+    error::AppError,
+    queue::TenantQueue,
+    webhook::{self, ssrf::validate_destination},
 };
 
 impl FromRef<AppState> for PgPool {
@@ -60,15 +64,20 @@ async fn health() -> Json<HealthCheckResponse> {
     })
 }
 
+#[derive(Serialize)]
+struct EnqueueResponse {
+    id: String,
+}
+
 async fn enqueue_webhook(
     State(state): State<AppState>,
     api_key: auth::ValidApiKey,
     extract::Json(request_body): extract::Json<WebhookRequest>,
-) -> Result<StatusCode, AppError> {
+) -> Result<(StatusCode, Json<EnqueueResponse>), AppError> {
     info!(tenant_id = %api_key.tenant_id, "Webhook enqueue requested");
 
     if state.webhook_limiter.check_key(&api_key.tenant_id).is_err() {
-        return Err(AppError::TooManyRequests)
+        return Err(AppError::TooManyRequests);
     };
 
     validate_destination(&state.policy, &request_body.destination)?;
@@ -85,9 +94,12 @@ async fn enqueue_webhook(
         return Err(AppError::MonthlyQuotaExceeded);
     }
 
-    webhook::enqueue(&state.worker_utils, api_key.tenant_id, request_body).await?;
+    let webhook_id = webhook::enqueue(&state.worker_utils, api_key.tenant_id, request_body).await?;
 
-    Ok(StatusCode::ACCEPTED)
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(EnqueueResponse { id: webhook_id }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -119,18 +131,17 @@ async fn signup(
     let mut tx = state.pg_pool.begin().await?;
 
     let tenant_id =
-        crate::db::tenants::create_tenant(&mut *tx, &body.name, &email_parsed, &hmac_secret)
-            .await?;
+        crate::db::tenants::create_tenant(&mut tx, &body.name, &email_parsed, &hmac_secret).await?;
 
     // redeem invite code for this tenant
-    crate::db::tenants::redeem_invite_code(&mut *tx, &body.invite_code, tenant_id).await?;
+    crate::db::tenants::redeem_invite_code(&mut tx, &body.invite_code, tenant_id).await?;
 
     // if that worked, create and serve their api key
     let raw_key = auth::generate_api_key();
     let key_hash = auth::hash_api_key(&raw_key);
     let expires_at = Utc::now() + Duration::days(TRIAL_DURATION_DAYS);
 
-    crate::db::tenants::create_api_key(&mut *tx, tenant_id, &key_hash, "trial", expires_at).await?;
+    crate::db::tenants::create_api_key(&mut tx, tenant_id, &key_hash, "trial", expires_at).await?;
 
     tx.commit().await?;
 

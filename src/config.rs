@@ -37,7 +37,11 @@ impl AppConfig {
             .parse::<u16>()
             .map_err(|_| ConfigError::MissingVar("PORT (invalid u16)".into()))?;
 
-        Ok(AppConfig { database_url, schema, port })
+        Ok(AppConfig {
+            database_url,
+            schema,
+            port,
+        })
     }
 }
 
@@ -69,7 +73,11 @@ mod tests {
     #[test]
     fn from_env_succeeds_with_all_vars() {
         let _guard = ENV_LOCK.lock().unwrap();
-        setup_env(Some("postgres://localhost/test"), Some("graphile"), Some("4000"));
+        setup_env(
+            Some("postgres://localhost/test"),
+            Some("graphile"),
+            Some("4000"),
+        );
         let config = AppConfig::parse().expect("should succeed");
         assert_eq!(config.database_url, "postgres://localhost/test");
         assert_eq!(config.schema, "graphile");
@@ -89,7 +97,10 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         setup_env(Some("postgres://localhost/test"), None, None);
         let err = AppConfig::parse().unwrap_err();
-        assert!(err.to_string().contains("GRAPHILE_SCHEMA"), "error was: {err}");
+        assert!(
+            err.to_string().contains("GRAPHILE_SCHEMA"),
+            "error was: {err}"
+        );
     }
 
     #[test]
@@ -103,7 +114,11 @@ mod tests {
     #[test]
     fn port_rejects_non_numeric() {
         let _guard = ENV_LOCK.lock().unwrap();
-        setup_env(Some("postgres://localhost/test"), Some("graphile"), Some("bad"));
+        setup_env(
+            Some("postgres://localhost/test"),
+            Some("graphile"),
+            Some("bad"),
+        );
         let err = AppConfig::parse().unwrap_err();
         assert!(err.to_string().contains("PORT"), "error was: {err}");
     }
