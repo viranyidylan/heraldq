@@ -1,10 +1,15 @@
 use chrono::{DateTime, Utc};
 use graphile_worker::Job;
+use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::SendWebhook;
 
+/// A successful delivery as shown to the tenant. Deliberately excludes the
+/// payload: list responses stay small (payloads run up to 2 MB), and the
+/// tenant already has the payload — they sent it.
+#[derive(Debug, Serialize)]
 pub struct DeliveryRecord {
     pub id: String,
     pub destination: String,
@@ -27,6 +32,34 @@ pub async fn find_by_id(
         webhook_id,
     )
     .fetch_optional(pool)
+    .await
+}
+
+pub async fn list_page(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<DeliveryRecord>, sqlx::Error> {
+    sqlx::query_as!(
+        DeliveryRecord,
+        r#"SELECT id, destination, status_code, attempts, enqueued_at, delivered_at
+        FROM webhook_deliveries WHERE tenant_id = $1
+        ORDER BY delivered_at DESC, id DESC LIMIT $2 OFFSET $3"#,
+        tenant_id,
+        limit,
+        offset,
+    )
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn count_total(pool: &PgPool, tenant_id: Uuid) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"SELECT COUNT(*) "count!" FROM webhook_deliveries WHERE tenant_id = $1"#,
+        tenant_id,
+    )
+    .fetch_one(pool)
     .await
 }
 
