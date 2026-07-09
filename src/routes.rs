@@ -38,6 +38,7 @@ pub fn build(state: AppState) -> Router {
         .route("/signup", post(signup))
         .route("/mock", post(mock))
         .route("/dlq", get(dlq))
+        .route("/deliveries", get(deliveries))
         .route("/summary", get(webhook_activity_summary))
         .route("/dashboard", get(dashboard));
 
@@ -185,7 +186,7 @@ struct DeadLetterResponse {
 }
 
 #[derive(Deserialize)]
-struct DlqPagination {
+struct Pagination {
     limit: Option<i64>,
     offset: Option<i64>,
 }
@@ -197,7 +198,7 @@ fn clamp_pagination(value: Option<i64>, default: i64, max: i64) -> i64 {
 async fn dlq(
     State(state): State<AppState>,
     api_key: auth::ValidApiKey,
-    Query(pagination): Query<DlqPagination>,
+    Query(pagination): Query<Pagination>,
 ) -> Result<Json<DeadLetterResponse>, AppError> {
     let tenant_id = api_key.tenant_id;
 
@@ -211,6 +212,37 @@ async fn dlq(
     Ok(Json(DeadLetterResponse {
         messages,
         dlq_total,
+        limit,
+        offset,
+    }))
+}
+
+#[derive(Serialize)]
+struct DeliveriesResponse {
+    deliveries: Vec<crate::db::deliveries::DeliveryRecord>,
+    total: i64,
+    limit: i64,
+    offset: i64,
+}
+
+async fn deliveries(
+    State(state): State<AppState>,
+    api_key: auth::ValidApiKey,
+    Query(pagination): Query<Pagination>,
+) -> Result<Json<DeliveriesResponse>, AppError> {
+    let tenant_id = api_key.tenant_id;
+
+    let limit = clamp_pagination(pagination.limit, 25, 100);
+    let offset = clamp_pagination(pagination.offset, 0, i64::MAX);
+
+    let (deliveries, total) = tokio::try_join!(
+        crate::db::deliveries::list_page(&state.pg_pool, tenant_id, limit, offset),
+        crate::db::deliveries::count_total(&state.pg_pool, tenant_id),
+    )?;
+
+    Ok(Json(DeliveriesResponse {
+        deliveries,
+        total,
         limit,
         offset,
     }))
