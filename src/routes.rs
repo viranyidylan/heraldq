@@ -175,9 +175,9 @@ async fn dashboard(
     Ok(Html(crate::views::render_dashboard(&counts)))
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Serialize)]
 struct DeadLetterResponse {
-    messages: Vec<WebhookRequest>,
+    messages: Vec<crate::db::dlq::DlqEntry>,
     dlq_total: i64,
     limit: i64,
     offset: i64,
