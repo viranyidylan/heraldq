@@ -70,6 +70,8 @@ impl TaskHandler for SendWebhook {
             .send()
             .await;
 
+        // Hand-aligned decision table — the columns are the point.
+        #[rustfmt::skip]
         let outcome = match res {
             Ok(r) => {
                 let status = r.status().as_u16();

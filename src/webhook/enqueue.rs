@@ -2,14 +2,13 @@ use graphile_worker::{JobSpecBuilder, WorkerUtils, errors::GraphileWorkerError};
 use ulid::Ulid;
 use uuid::Uuid;
 
-use crate::{SendWebhook, WebhookRequest, queue::TenantQueue};
+use crate::{SendWebhook, WebhookRequest};
 
 pub async fn enqueue(
     utils: &WorkerUtils,
     tenant_id: Uuid,
     request_body: WebhookRequest,
 ) -> Result<String, GraphileWorkerError> {
-    let tenant_queue = TenantQueue::for_tenant(tenant_id);
     let webhook_id = Ulid::new().to_string();
     utils
         .add_job(
@@ -20,7 +19,6 @@ pub async fn enqueue(
                 payload: request_body.payload,
             },
             JobSpecBuilder::new()
-                .queue_name(tenant_queue.as_str())
                 // 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s(~2mins)
                 // 256s(~4mins), 512s(~8.5mins), 1024s(~17mins)
                 // 2048s(~34mins), 4096s(~68mins)

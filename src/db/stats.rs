@@ -2,15 +2,16 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::{db::dlq::count_dlq_total, queue::TenantQueue};
+use crate::db::dlq::count_dlq_total;
 
-pub async fn count_jobs_queued_today(
-    pool: &PgPool,
-    tenant_queue: &TenantQueue,
-) -> Result<i64, sqlx::Error> {
+pub async fn count_jobs_queued_today(pool: &PgPool, tenant_id: Uuid) -> Result<i64, sqlx::Error> {
+    // Tenant attribution comes from the job payload (a serialized SendWebhook).
+    // The public graphile_worker.jobs view deliberately omits the payload
+    // column, so this reads the _private_jobs table — coupled to graphile
+    // internals; re-verify on graphile_worker upgrades.
     let count = sqlx::query_scalar!(
-        r#"SELECT COUNT(*) as "count!" FROM graphile_worker.jobs WHERE created_at >= CURRENT_DATE AND queue_name = $1"#,
-        tenant_queue.as_str(),
+        r#"SELECT COUNT(*) as "count!" FROM graphile_worker._private_jobs WHERE created_at >= CURRENT_DATE AND payload->>'tenant_id' = $1"#,
+        tenant_id.to_string(),
     )
     .fetch_one(pool)
     .await?;
@@ -52,10 +53,9 @@ pub struct WebhookActivitySummary {
 pub async fn activity_summary(
     pool: &PgPool,
     tenant_id: Uuid,
-    tenant_queue: &TenantQueue,
 ) -> Result<WebhookActivitySummary, sqlx::Error> {
     let (queued, delivered_today, failed_today, dlq_total) = tokio::try_join!(
-        count_jobs_queued_today(pool, tenant_queue),
+        count_jobs_queued_today(pool, tenant_id),
         count_delivered_today(pool, tenant_id),
         count_failed_today(pool, tenant_id),
         count_dlq_total(pool, tenant_id),
