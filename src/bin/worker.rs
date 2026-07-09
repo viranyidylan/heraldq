@@ -9,6 +9,15 @@ use sliq::{
 use std::{sync::Arc, time::Duration};
 use tracing::info;
 
+/// Jobs executed in parallel. Every in-flight job can hold a DB connection
+/// (hmac-secret lookup, terminal-state insert), so the pool is sized from
+/// this constant — change them together, or jobs stall waiting on the pool.
+const WORKER_CONCURRENCY: usize = 30;
+
+/// Headroom over concurrency for graphile's own machinery (job fetching,
+/// batched completions) and the migration run at startup.
+const WORKER_POOL_SIZE: u32 = WORKER_CONCURRENCY as u32 + 4;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
@@ -20,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = AppConfig::from_env()?;
 
-    let pg_pool = db::create_pool(&config).await?;
+    let pg_pool = db::create_pool(&config, WORKER_POOL_SIZE).await?;
     db::run_migrations(&pg_pool).await?;
 
     let resolver = ssrf::SecureResolver {
@@ -59,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         // Job completions are collected in a batch and flushed together after a delay to reduce the number of SQL round trips
         .complete_job_batch_delay(Duration::from_millis(5))
-        .concurrency(30)
+        .concurrency(WORKER_CONCURRENCY)
         .schema(&config.schema.clone()) // Use this PostgreSQL schema
         .define_job::<SendWebhook>() // Register the task handler
         .pg_pool(pg_pool)

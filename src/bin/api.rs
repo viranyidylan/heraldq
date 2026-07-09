@@ -6,6 +6,10 @@ use nonzero_ext::nonzero;
 use sliq::{AppState, config::AppConfig, db, routes, webhook::ssrf};
 use tracing::info;
 
+/// API queries are short (auth lookup, quota bump, enqueue, list pages);
+/// a small pool suffices and leaves Postgres connection budget for the worker.
+const API_POOL_SIZE: u32 = 10;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
@@ -15,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = AppConfig::from_env()?;
 
-    let pg_pool = db::create_pool(&config).await?;
+    let pg_pool = db::create_pool(&config, API_POOL_SIZE).await?;
     db::run_migrations(&pg_pool).await?;
 
     let utils = WorkerUtils::new(pg_pool.clone(), config.schema.clone());
