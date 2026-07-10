@@ -19,6 +19,12 @@ pub async fn enqueue(
                 payload: request_body.payload,
             },
             JobSpecBuilder::new()
+                // The webhook ULID doubles as graphile's job key, which is
+                // backed by a unique index — status lookups find pending jobs
+                // by key instead of scanning every job's payload. ULIDs are
+                // unique, so the key's replace-on-collision semantics never
+                // trigger.
+                .job_key(webhook_id.clone())
                 // graphile backoff is exp(least(attempts, 10)) seconds, i.e.
                 // e^n capped at e^10 ≈ 6.1h: ~2.7s, 7.4s, 20s, 55s, 2.5m,
                 // 6.7m, 18m, 50m, 2.25h, then 6.1h between each remaining
