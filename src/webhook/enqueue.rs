@@ -10,6 +10,19 @@ pub async fn enqueue(
     request_body: WebhookRequest,
 ) -> Result<String, GraphileWorkerError> {
     let webhook_id = Ulid::new().to_string();
+    enqueue_with_id(utils, webhook_id.clone(), tenant_id, request_body).await?;
+    Ok(webhook_id)
+}
+
+/// Enqueue under a caller-supplied webhook id. Used by DLQ replay, which
+/// mints the id up front so it can atomically claim the DLQ row with it
+/// before the job exists.
+pub async fn enqueue_with_id(
+    utils: &WorkerUtils,
+    webhook_id: String,
+    tenant_id: Uuid,
+    request_body: WebhookRequest,
+) -> Result<(), GraphileWorkerError> {
     utils
         .add_job(
             SendWebhook {
@@ -35,5 +48,5 @@ pub async fn enqueue(
                 .build(),
         )
         .await?;
-    Ok(webhook_id)
+    Ok(())
 }

@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO tenants (name, tier, email, hmac_secret)\n        VALUES ('replay-test', 'free', 'replay@test.invalid', 'not-a-real-secret')\n        RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "56d8d2dd81fee18b07dbd4b28a653742bd432566e0f6d272f1d06d2346b15a63"
+}

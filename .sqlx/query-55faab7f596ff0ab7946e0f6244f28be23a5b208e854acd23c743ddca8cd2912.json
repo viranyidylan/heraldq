@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE dead_letter_queue\n        SET replayed_at = NULL, replayed_as = NULL\n        WHERE tenant_id = $1 AND id = $2 AND replayed_as = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "55faab7f596ff0ab7946e0f6244f28be23a5b208e854acd23c743ddca8cd2912"
+}

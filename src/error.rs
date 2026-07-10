@@ -16,6 +16,8 @@ pub enum AppError {
     Unauthorized,
     #[error("not found")]
     NotFound,
+    #[error("already replayed")]
+    AlreadyReplayed { replayed_as: String },
     // generic 5xx bucket — real cause logged, never in the response body
     #[error("internal server error")]
     Internal(#[from] sqlx::Error),
@@ -46,6 +48,13 @@ impl IntoResponse for AppError {
             ),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::NotFound => (StatusCode::NOT_FOUND, "not found"),
+            Self::AlreadyReplayed { ref replayed_as } => {
+                return (
+                    StatusCode::CONFLICT,
+                    format!("already replayed as {replayed_as}"),
+                )
+                    .into_response();
+            }
             Self::Internal(ref e) => {
                 error!(error = ?e, "internal server error");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, destination, payload, failure_reason, status_code, attempts,\n            enqueued_at, abandoned_at\n        FROM dead_letter_queue WHERE tenant_id = $1\n        ORDER BY abandoned_at DESC, id DESC LIMIT $2 OFFSET $3",
+  "query": "SELECT id, destination, payload, failure_reason, status_code, attempts,\n            enqueued_at, abandoned_at, replayed_at, replayed_as\n        FROM dead_letter_queue WHERE tenant_id = $1 AND id = $2",
   "describe": {
     "columns": [
       {
@@ -42,13 +42,22 @@
         "ordinal": 7,
         "name": "abandoned_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "replayed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "replayed_as",
+        "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
         "Uuid",
-        "Int8",
-        "Int8"
+        "Text"
       ]
     },
     "nullable": [
@@ -59,8 +68,10 @@
       true,
       true,
       false,
-      false
+      false,
+      true,
+      true
     ]
   },
-  "hash": "86eb8034dd6c6bea885d77acaf36ba35a4e3c0ffb39f4d228bc9b4cc8c4fe4c5"
+  "hash": "cce6bed071905f14cef69e4fa6027bf6ae404c8e4f357bd6a4221d20d0e5c581"
 }

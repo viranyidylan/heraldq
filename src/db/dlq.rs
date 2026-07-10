@@ -20,6 +20,60 @@ pub struct DlqEntry {
     pub attempts: Option<i16>,
     pub enqueued_at: DateTime<Utc>,
     pub abandoned_at: DateTime<Utc>,
+    /// Set once the tenant replays this entry: when, and the id of the new
+    /// delivery attempt it became.
+    pub replayed_at: Option<DateTime<Utc>>,
+    pub replayed_as: Option<String>,
+}
+
+/// What a replay needs from the claimed row to re-enqueue it.
+pub struct ReplaySource {
+    pub destination: String,
+    pub payload: Value,
+}
+
+/// Atomically claim a DLQ entry for replay by stamping replayed_at/-as.
+/// The `replayed_at IS NULL` guard makes this first-caller-wins: a second
+/// concurrent replay of the same entry gets `None` instead of a second job.
+pub async fn claim_for_replay(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    webhook_id: &str,
+    new_webhook_id: &str,
+) -> Result<Option<ReplaySource>, sqlx::Error> {
+    sqlx::query_as!(
+        ReplaySource,
+        r#"UPDATE dead_letter_queue
+        SET replayed_at = now(), replayed_as = $3
+        WHERE tenant_id = $1 AND id = $2 AND replayed_at IS NULL
+        RETURNING destination, payload"#,
+        tenant_id,
+        webhook_id,
+        new_webhook_id,
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+/// Roll back a replay claim after a failed enqueue, so the tenant can try
+/// again. Guarded by replayed_as so it can only undo its own claim.
+pub async fn unclaim_replay(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    webhook_id: &str,
+    new_webhook_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"UPDATE dead_letter_queue
+        SET replayed_at = NULL, replayed_as = NULL
+        WHERE tenant_id = $1 AND id = $2 AND replayed_as = $3"#,
+        tenant_id,
+        webhook_id,
+        new_webhook_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 pub async fn insert(
@@ -75,7 +129,7 @@ pub async fn find_by_id(
     sqlx::query_as!(
         DlqEntry,
         r#"SELECT id, destination, payload, failure_reason, status_code, attempts,
-            enqueued_at, abandoned_at
+            enqueued_at, abandoned_at, replayed_at, replayed_as
         FROM dead_letter_queue WHERE tenant_id = $1 AND id = $2"#,
         tenant_id,
         webhook_id,
@@ -104,7 +158,7 @@ pub async fn list_page(
     let messages = sqlx::query_as!(
         DlqEntry,
         r#"SELECT id, destination, payload, failure_reason, status_code, attempts,
-            enqueued_at, abandoned_at
+            enqueued_at, abandoned_at, replayed_at, replayed_as
         FROM dead_letter_queue WHERE tenant_id = $1
         ORDER BY abandoned_at DESC, id DESC LIMIT $2 OFFSET $3"#,
         tenant_id,
