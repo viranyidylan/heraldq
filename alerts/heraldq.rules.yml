@@ -44,6 +44,38 @@ groups:
             More than ~45 webhooks/15m are reaching the DLQ. Inspect
             failure_reason in dead_letter_queue for a common cause.
 
+      # Backpressure: the job at the head of the queue has been waiting too
+      # long — workers are not keeping up with intake. Age, not depth, is the
+      # signal: depth spikes are fine if they drain, but age climbing means
+      # we are falling behind. Depth (heraldq_queue_depth) belongs on a
+      # dashboard for capacity planning, not in an alert.
+      - alert: HeraldQQueueLagging
+        expr: heraldq_queue_oldest_job_age_seconds > 60
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HeraldQ webhook queue is lagging behind intake"
+          description: >-
+            The oldest runnable job has waited {{ $value | humanizeDuration }}
+            (>60s for 5m). Delivery latency is degrading — check worker
+            health, delivery duration, and queue depth for the cause.
+
+      # Same signal, drowning threshold. Ten minutes of head-of-line wait
+      # means deliveries are effectively stalled for every tenant.
+      - alert: HeraldQQueueStalled
+        expr: heraldq_queue_oldest_job_age_seconds > 600
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HeraldQ webhook queue is stalled"
+          description: >-
+            The oldest runnable job has waited {{ $value | humanizeDuration }}.
+            Webhooks are not being delivered at a meaningful rate — worker
+            down or wedged, Postgres contention, or intake far beyond
+            capacity.
+
       # No scrape = no metrics = every rule above is blind. Alert on the
       # blindness itself.
       - alert: HeraldQTargetDown
