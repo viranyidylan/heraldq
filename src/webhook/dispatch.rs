@@ -165,3 +165,27 @@ pub fn sign_bytes(secret: &[u8], timestamp_utc: &str, body_as_bytes: &[u8]) -> S
     mac.update(body_as_bytes);
     hex::encode(mac.finalize().into_bytes())
 }
+
+#[cfg(test)]
+mod signature_format {
+    use super::*;
+
+    /// The signature is a WIRE FORMAT shared with every customer's verifier:
+    /// hex(HMAC_SHA256(secret, "{t}" + "." + raw_body)). This vector is also
+    /// asserted by the vendorable verifiers in sdk/ (their test blocks) and
+    /// documented in docs/webhook-signatures.md — if this test breaks, every
+    /// customer's signature verification breaks with it. Change all three
+    /// together or not at all.
+    #[test]
+    fn signature_test_vector_is_stable() {
+        let sig = sign_bytes(
+            b"whsec_testvector_not_a_real_secret",
+            "1720000000",
+            br#"{"event":"order.created","amount":12999}"#,
+        );
+        assert_eq!(
+            sig,
+            "9619a809cd234fe3ee491cd2a9450e6532a3abb6eda63369204b8b92da650cd9"
+        );
+    }
+}
