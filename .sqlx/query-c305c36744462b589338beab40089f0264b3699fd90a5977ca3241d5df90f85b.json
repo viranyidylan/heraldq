@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO webhook_deliveries (\n            id, tenant_id, destination, payload, enqueued_at, status_code, attempts\n            )\n        VALUES ($1, $2, $3, $4, $5, $6, $7)\n        ON CONFLICT (id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Jsonb",
+        "Timestamptz",
+        "Int2",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c305c36744462b589338beab40089f0264b3699fd90a5977ca3241d5df90f85b"
+}
