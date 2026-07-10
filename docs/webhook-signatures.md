@@ -86,9 +86,10 @@ function verify(secret, sigHeader, rawBody, toleranceSecs = 300) {
 ## Delivery semantics
 
 - **At-least-once.** HeraldQ retries failed deliveries with exponential backoff (up to 15
-  attempts over ~9 hours). In rare cases a webhook you already processed may be
-  delivered again — deduplicate using the `Idempotency-Key` header, which is stable
-  across every attempt of the same webhook.
+  attempts over ~34 hours — full schedule in
+  [delivery-behavior](delivery-behavior.md)). In rare cases a webhook you already
+  processed may be delivered again — deduplicate using the `Idempotency-Key` header,
+  which is stable across every attempt of the same webhook.
 - **Each attempt is signed fresh.** Retries carry a new `t` and a new signature, so the
   replay-window check in step 3 won't reject legitimate retries.
 - **Respond fast.** Return a `2xx` as soon as you've durably accepted the webhook

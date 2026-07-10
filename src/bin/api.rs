@@ -3,7 +3,7 @@ use std::sync::Arc;
 use governor::{Quota, RateLimiter};
 use graphile_worker::WorkerUtils;
 use nonzero_ext::nonzero;
-use sliq::{AppState, config::AppConfig, db, routes, webhook::ssrf};
+use sliq::{AppState, config::AppConfig, db, routes, telemetry, webhook::ssrf};
 use tracing::info;
 
 /// API queries are short (auth lookup, quota bump, enqueue, list pages);
@@ -13,9 +13,8 @@ const API_POOL_SIZE: u32 = 10;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    telemetry::init_tracing();
+    telemetry::init_metrics()?;
 
     let config = AppConfig::from_env()?;
 
@@ -52,8 +51,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Resolves on SIGINT (Ctrl+C) or SIGTERM. Docker, Kubernetes, and systemd
+/// all stop processes with SIGTERM — listening for Ctrl+C alone means every
+/// production deploy kills in-flight requests instead of draining them.
 async fn shutdown_signal() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to install CTRL+C signal handler");
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install CTRL+C signal handler");
+    };
+
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM signal handler")
+            .recv()
+            .await;
+    };
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    info!("shutdown signal received, draining in-flight requests");
 }

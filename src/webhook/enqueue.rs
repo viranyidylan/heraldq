@@ -25,10 +25,12 @@ pub async fn enqueue(
                 // unique, so the key's replace-on-collision semantics never
                 // trigger.
                 .job_key(webhook_id.clone())
-                // 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s(~2mins)
-                // 256s(~4mins), 512s(~8.5mins), 1024s(~17mins)
-                // 2048s(~34mins), 4096s(~68mins)
-                // 8_192s(~2.25hrs), 16_384s(~4.5hrs)
+                // graphile backoff is exp(least(attempts, 10)) seconds, i.e.
+                // e^n capped at e^10 ≈ 6.1h: ~2.7s, 7.4s, 20s, 55s, 2.5m,
+                // 6.7m, 18m, 50m, 2.25h, then 6.1h between each remaining
+                // attempt. 15 attempts span ~34h total before dead-lettering.
+                // Documented for customers in docs/delivery-behavior.md —
+                // change these together.
                 .max_attempts(15)
                 .build(),
         )

@@ -1,0 +1,25 @@
+# Template for provisioning where alerts get DELIVERED. Grafana only loads
+# .yml/.yaml files, so this .example is inert until you copy it:
+#
+#   cp contactpoints.yml.example contactpoints.yml   # then fill in the URL
+#
+# contactpoints.yml is gitignored-by-convention (it holds a webhook URL —
+# treat it like a credential). Alternatively configure the same thing in the
+# UI: Alerting → Contact points, and point the default notification policy
+# at it.
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: heraldq-ops
+    receivers:
+      - uid: heraldq-ops-slack
+        type: slack
+        settings:
+          url: https://hooks.slack.com/services/REPLACE/WITH/YOURS
+        disableResolveMessage: false
+
+policies:
+  - orgId: 1
+    receiver: heraldq-ops
+    group_by: ["alertname"]
