@@ -9,8 +9,13 @@ use rand::RngExt;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use tower::ServiceBuilder;
+use tower_http::{
+    request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
+    trace::{DefaultOnResponse, TraceLayer},
+};
 
-use tracing::{debug, info};
+use tracing::{Level, debug, info};
 
 use crate::{
     AppState, WebhookRequest, auth,
@@ -46,6 +51,32 @@ pub fn build(state: AppState) -> Router {
         .route("/ping", get(ping))
         .route("/health", get(health))
         .nest("/v1", v1)
+        // ServiceBuilder applies top-down: assign a request id first, then
+        // open the trace span (so the id is visible inside it), then copy the
+        // id onto the response so a customer can quote it back at us.
+        .layer(
+            ServiceBuilder::new()
+                .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
+                .layer(
+                    TraceLayer::new_for_http()
+                        .make_span_with(|req: &extract::Request| {
+                            let request_id = req
+                                .headers()
+                                .get("x-request-id")
+                                .and_then(|v| v.to_str().ok())
+                                .unwrap_or("");
+                            tracing::info_span!(
+                                "request",
+                                method = %req.method(),
+                                path = %req.uri().path(),
+                                request_id,
+                            )
+                        })
+                        // access log: one INFO line per response, with latency
+                        .on_response(DefaultOnResponse::new().level(Level::INFO)),
+                )
+                .layer(PropagateRequestIdLayer::x_request_id()),
+        )
         .with_state(state)
 }
 

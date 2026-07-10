@@ -1,0 +1,58 @@
+# Prometheus alerting rules for HeraldQ.
+#
+# Load via prometheus.yml:
+#   rule_files:
+#     - alerts/heraldq.rules.yml
+#
+# Scrape config — each binary exports on its own METRICS_PORT:
+#   scrape_configs:
+#     - job_name: heraldq-api
+#       static_configs: [{ targets: ["api-host:9464"] }]
+#     - job_name: heraldq-worker
+#       static_configs: [{ targets: ["worker-host:9465"] }]
+
+groups:
+  - name: heraldq
+    rules:
+      # The one that matters most: the worker tried to dead-letter a webhook
+      # and the DLQ write itself failed. The job will retry, but if this
+      # persists the webhook vanishes with no tenant-visible record — the
+      # single silent-data-loss path in the system. Any occurrence pages.
+      - alert: HeraldQDlqWriteFailure
+        expr: increase(heraldq_dlq_write_failures_total[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "HeraldQ failed to write a dead-lettered webhook to the DLQ"
+          description: >-
+            {{ $value }} DLQ write(s) failed in the last 5 minutes. Webhooks
+            that exhaust retries during this condition are lost without a
+            tenant-visible record. Check worker logs for [CRITICAL ERROR]
+            and Postgres health.
+
+      # Dead-lettering is normal in ones and twos (customer endpoints break).
+      # A sustained rate means something systemic: our egress, DNS, or a big
+      # tenant's endpoint being down long enough to exhaust 15 retries.
+      - alert: HeraldQDeadLetterSpike
+        expr: sum(rate(heraldq_webhooks_dead_lettered_total[15m])) > 0.05
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HeraldQ is dead-lettering webhooks at an elevated rate"
+          description: >-
+            More than ~45 webhooks/15m are reaching the DLQ. Inspect
+            failure_reason in dead_letter_queue for a common cause.
+
+      # No scrape = no metrics = every rule above is blind. Alert on the
+      # blindness itself.
+      - alert: HeraldQTargetDown
+        expr: up{job=~"heraldq-.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HeraldQ process {{ $labels.job }} is not being scraped"
+          description: >-
+            {{ $labels.instance }} has been unreachable for 2 minutes —
+            process down, METRICS_PORT unset, or network path broken.

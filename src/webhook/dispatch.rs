@@ -1,6 +1,7 @@
 use chrono::Utc;
 use graphile_worker::{IntoTaskHandlerResult, TaskHandler, WorkerContext};
 use hmac::{Hmac, Mac};
+use metrics::{counter, histogram};
 use sha2::Sha256;
 type HmacSha256 = Hmac<Sha256>;
 use tracing::{error, info, warn};
@@ -61,6 +62,7 @@ impl TaskHandler for SendWebhook {
         let hex_sig = sign_bytes(secret.as_bytes(), &timestamp_utc, &body_as_bytes);
         let signature_header = format!("t={},v1={}", timestamp_utc, hex_sig);
 
+        let started = std::time::Instant::now();
         let res = http_client
             .post(&self.destination)
             .header("Content-Type", "application/json")
@@ -69,6 +71,8 @@ impl TaskHandler for SendWebhook {
             .body(body_as_bytes)
             .send()
             .await;
+        histogram!("heraldq_webhook_delivery_duration_seconds")
+            .record(started.elapsed().as_secs_f64());
 
         // Hand-aligned decision table — the columns are the point.
         #[rustfmt::skip]
@@ -100,10 +104,12 @@ impl TaskHandler for SendWebhook {
             Outcome::Success { status } => {
                 info!(webhook_id = %self.id, job_id = %job_id, "Webhook delivered successfully");
                 db::deliveries::insert(pg_pool, self, job, status.map(|s| s as i16)).await?;
+                counter!("heraldq_webhooks_delivered_total").increment(1);
                 Ok(())
             }
             Outcome::Retry { reason, status } => {
                 warn!(webhook_id = %self.id, job_id = %job_id, reason = %reason, "Retryable failure, will retry");
+                counter!("heraldq_webhook_attempts_retried_total").increment(1);
                 if attempts >= job.max_attempts() {
                     info!("[TRACER BULLET] Max retries exhausted, adding to dlq");
                     if let Err(db_err) = db::dlq::insert(
@@ -120,8 +126,12 @@ impl TaskHandler for SendWebhook {
                             error = ?db_err,
                             "[CRITICAL ERROR] Failed to write exhausted job to DLQ"
                         );
+                        // A webhook is about to vanish without a trace — this
+                        // counter is wired to a critical alert.
+                        counter!("heraldq_dlq_write_failures_total").increment(1);
                         return Err(DispatchError::Database(db_err));
                     };
+                    counter!("heraldq_webhooks_dead_lettered_total").increment(1);
                 }
                 Err(DispatchError::Retryable { reason, status })
             }
@@ -136,8 +146,12 @@ impl TaskHandler for SendWebhook {
                         error = ?db_err,
                         "[CRITICAL ERROR] Failed to write perma-fail job to DLQ"
                     );
+                    // A webhook is about to vanish without a trace — this
+                    // counter is wired to a critical alert.
+                    counter!("heraldq_dlq_write_failures_total").increment(1);
                     return Err(DispatchError::Database(db_err));
                 }
+                counter!("heraldq_webhooks_dead_lettered_total").increment(1);
                 Ok(())
             }
         }
