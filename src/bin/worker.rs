@@ -15,9 +15,9 @@ use tracing::info;
 const WORKER_CONCURRENCY: usize = 30;
 
 /// Headroom over concurrency for graphile's own machinery (job fetching,
-/// batched completions), the migration run at startup, and the queue
-/// backpressure poller's periodic query.
-const WORKER_POOL_SIZE: u32 = WORKER_CONCURRENCY as u32 + 5;
+/// batched completions), the migration run at startup, and the periodic
+/// background tasks (queue backpressure poller, retention sweeper).
+const WORKER_POOL_SIZE: u32 = WORKER_CONCURRENCY as u32 + 6;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -53,6 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Database connection established");
 
     telemetry::spawn_queue_depth_poller(pg_pool.clone());
+    db::retention::spawn_sweeper(pg_pool.clone());
 
     // Initialize and run the worker
     let worker = graphile_worker::WorkerOptions::default()

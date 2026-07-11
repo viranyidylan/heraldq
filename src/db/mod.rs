@@ -6,6 +6,7 @@ pub mod deliveries;
 pub mod dlq;
 pub mod jobs;
 pub mod quotas;
+pub mod retention;
 pub mod stats;
 pub mod tenants;
 

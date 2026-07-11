@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM webhook_deliveries\n        WHERE id IN (\n            SELECT wd.id FROM webhook_deliveries wd\n            JOIN tenants t ON t.id = wd.tenant_id\n            WHERE wd.delivered_at < now() - make_interval(days => t.delivered_retention_days)\n            LIMIT $1\n        )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "28946d3dfbece82718fcb34a6e67a47b1686a15caec01040b38c00d7bacd2685"
+}
