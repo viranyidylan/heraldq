@@ -1,6 +1,7 @@
 use axum::{
     Json, Router,
     extract::{self, FromRef, Path, Query, State},
+    middleware,
     response::Html,
     routing::{get, post},
 };
@@ -21,6 +22,7 @@ use crate::{
     AppState, WebhookRequest, auth,
     db::stats::WebhookActivitySummary,
     error::AppError,
+    telemetry,
     webhook::{self, ssrf::validate_destination},
 };
 
@@ -76,6 +78,9 @@ pub fn build(state: AppState) -> Router {
                         // access log: one INFO line per response, with latency
                         .on_response(DefaultOnResponse::new().level(Level::INFO)),
                 )
+                // Inside the trace span so failures are attributable, and
+                // wrapping the handlers so the histogram times handler work.
+                .layer(middleware::from_fn(telemetry::track_metrics))
                 .layer(PropagateRequestIdLayer::x_request_id()),
         )
         .with_state(state)

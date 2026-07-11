@@ -8,9 +8,14 @@
 //!   becomes a no-op — safe for local dev, loud enough in the logs to notice
 //!   in production. Each binary is its own process, so give each its own port.
 
-use metrics_exporter_prometheus::PrometheusBuilder;
+use axum::{
+    extract::{MatchedPath, Request},
+    middleware::Next,
+    response::Response,
+};
+use metrics_exporter_prometheus::{Matcher, PrometheusBuilder};
 use sqlx::PgPool;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -40,12 +45,29 @@ pub enum TelemetryError {
     Exporter(#[from] metrics_exporter_prometheus::BuildError),
 }
 
+/// API latency buckets, in seconds. The API only validates and enqueues, so
+/// the interesting range is sub-millisecond to ~1s; anything past that is
+/// already an incident and lands in `+Inf`.
+const API_LATENCY_BUCKETS: &[f64] = &[
+    0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0,
+];
+
+/// Delivery buckets span a wider range: these are outbound calls to arbitrary
+/// customer endpoints, bounded by the dispatch timeout rather than by us.
+const DELIVERY_BUCKETS: &[f64] = &[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0];
+
 /// Install the Prometheus exporter if `METRICS_PORT` is set.
 ///
 /// Must run inside the Tokio runtime (the exporter spawns its HTTP listener
 /// as a task). A bad port or a failed bind is a hard error: a production
 /// process that *thinks* it is exporting metrics but isn't is exactly the
 /// failure mode this module exists to prevent.
+///
+/// Both histograms get explicit buckets. Without them the exporter renders
+/// histograms as Prometheus *summaries* — pre-computed quantiles that cannot
+/// be aggregated across instances, so a fleet-wide p99 becomes impossible the
+/// moment we run more than one replica. Buckets are the aggregatable form, and
+/// they are what `histogram_quantile()` in the alert rules requires.
 pub fn init_metrics() -> Result<(), TelemetryError> {
     let Ok(raw_port) = std::env::var("METRICS_PORT") else {
         warn!("METRICS_PORT not set — Prometheus exporter disabled, metrics are no-ops");
@@ -58,10 +80,70 @@ pub fn init_metrics() -> Result<(), TelemetryError> {
 
     PrometheusBuilder::new()
         .with_http_listener(([0, 0, 0, 0], port))
+        .set_buckets_for_metric(
+            Matcher::Full("heraldq_http_request_duration_seconds".to_owned()),
+            API_LATENCY_BUCKETS,
+        )?
+        .set_buckets_for_metric(
+            Matcher::Full("heraldq_webhook_delivery_duration_seconds".to_owned()),
+            DELIVERY_BUCKETS,
+        )?
         .install()?;
 
     info!(port, "Prometheus exporter listening on /metrics");
     Ok(())
+}
+
+/// Label value for requests that matched no route. Without this, 404 floods
+/// (scanners probing random paths) would mint an unbounded number of time
+/// series — the same cardinality blowup `MatchedPath` exists to prevent.
+const UNMATCHED_PATH: &str = "unknown";
+
+/// Axum middleware exporting the API's RED metrics:
+///
+/// - `heraldq_http_requests_total{method,path,status}` — rate and error rate.
+/// - `heraldq_http_request_duration_seconds{method,path}` — latency.
+///
+/// The `path` label is the *route template* (`/v1/webhook/{id}`), never the
+/// concrete URI. Labelling by URI would mint one Prometheus time series per
+/// webhook ULID and melt the scrape target; `MatchedPath` is what axum stashes
+/// in the request extensions after routing, and it is the bounded version.
+///
+/// Duration deliberately carries no `status` label: p99 latency per endpoint is
+/// the useful cut, and every extra label multiplies the series count rather
+/// than adding to it.
+pub async fn track_metrics(req: Request, next: Next) -> Response {
+    // Read what we need before `next.run` takes ownership of the request.
+    let method = req.method().to_string();
+    let path = req
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|p| p.as_str().to_owned())
+        .unwrap_or_else(|| UNMATCHED_PATH.to_owned());
+
+    let start = Instant::now();
+    let response = next.run(req).await;
+    // Prometheus convention is base units — seconds, not millis.
+    let latency = start.elapsed().as_secs_f64();
+
+    let status = response.status().as_u16().to_string();
+
+    metrics::counter!(
+        "heraldq_http_requests_total",
+        "method" => method.clone(),
+        "path" => path.clone(),
+        "status" => status,
+    )
+    .increment(1);
+
+    metrics::histogram!(
+        "heraldq_http_request_duration_seconds",
+        "method" => method,
+        "path" => path,
+    )
+    .record(latency);
+
+    response
 }
 
 /// How often the backpressure gauges are refreshed. Prometheus scrapes
