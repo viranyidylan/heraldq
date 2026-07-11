@@ -9,6 +9,8 @@
 //!   in production. Each binary is its own process, so give each its own port.
 
 use metrics_exporter_prometheus::PrometheusBuilder;
+use sqlx::PgPool;
+use std::time::Duration;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -60,4 +62,56 @@ pub fn init_metrics() -> Result<(), TelemetryError> {
 
     info!(port, "Prometheus exporter listening on /metrics");
     Ok(())
+}
+
+/// How often the backpressure gauges are refreshed. Prometheus scrapes
+/// default to 15s–60s, so polling faster than this buys nothing.
+const QUEUE_POLL_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Spawn a background task that polls graphile's job table and exports
+/// queue-backpressure gauges:
+///
+/// - `heraldq_queue_depth` — jobs that are due (`run_at <= now()`) and
+///   unclaimed. Scheduled retries with future `run_at` are excluded (they
+///   are waiting on backoff, not on worker capacity), as are permanently
+///   exhausted jobs (`attempts = max_attempts`) — graphile leaves those in
+///   the table as tombstones, and counting them would peg both gauges high
+///   forever.
+/// - `heraldq_queue_oldest_job_age_seconds` — how long the job at the head
+///   of the line has been waiting. This is the true backpressure signal:
+///   depth can spike harmlessly if workers drain it, but age climbing means
+///   we are falling behind.
+///
+/// A failed poll logs and skips the tick rather than exiting — a dead poller
+/// would freeze the gauges at their last value and lie to every alert built
+/// on them. Holds one pool connection per tick; accounted for in the worker
+/// pool's headroom.
+pub fn spawn_queue_depth_poller(pool: PgPool) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(QUEUE_POLL_INTERVAL);
+        loop {
+            tick.tick().await;
+
+            // Reads the public graphile_worker.jobs view — coupled to
+            // graphile internals; re-verify on upgrades (same caveat as
+            // db::jobs::find_by_webhook_id).
+            let row = sqlx::query!(
+                r#"SELECT count(*) AS "depth!",
+                    COALESCE(EXTRACT(EPOCH FROM now() - min(run_at)), 0)::float8 AS "oldest_secs!"
+                FROM graphile_worker.jobs
+                WHERE run_at <= now() AND locked_at IS NULL
+                    AND attempts < max_attempts"#
+            )
+            .fetch_one(&pool)
+            .await;
+
+            match row {
+                Ok(r) => {
+                    metrics::gauge!("heraldq_queue_depth").set(r.depth as f64);
+                    metrics::gauge!("heraldq_queue_oldest_job_age_seconds").set(r.oldest_secs);
+                }
+                Err(e) => warn!(error = ?e, "queue backpressure poll failed, skipping tick"),
+            }
+        }
+    });
 }
