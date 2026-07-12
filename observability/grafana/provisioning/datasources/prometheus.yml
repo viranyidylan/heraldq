@@ -1,0 +1,32 @@
+# Provisions the Prometheus datasource, alongside HeraldQ-Postgres.
+#
+# Two datasources on one dashboard is the design, not an accident. They answer
+# different classes of question and neither can do the other's job:
+#
+#   Prometheus  — aggregate, bounded-cardinality time series. Request rate, p99
+#                 latency, queue depth over time. Cheap, fast, and what the
+#                 alert rules fire on. Deliberately cannot tell you *which*
+#                 webhook was slow — that omission is what makes it cheap.
+#   Postgres    — exact, row-level records. Which customer endpoint is failing,
+#                 what's in the DLQ, per-tenant history. Unbounded cardinality
+#                 by design; a failure leaderboard would be a cardinality bomb
+#                 as a Prometheus label.
+#
+# URL points at the local Prometheus (observability/prometheus.sh). In Grafana
+# Cloud this datasource is created for you as `grafanacloud-<stack>-prom`.
+apiVersion: 1
+
+datasources:
+  - name: HeraldQ-Prometheus
+    uid: heraldq-prom
+    type: prometheus
+    access: proxy
+    url: ${PROMETHEUS_URL}
+    jsonData:
+      # Must be >= the scrape_interval in observability/prometheus/prometheus.yml.
+      # Set lower and Grafana requests finer steps than the data actually has,
+      # producing gaps in every graph.
+      timeInterval: 15s
+      httpMethod: POST
+    isDefault: false
+    editable: true

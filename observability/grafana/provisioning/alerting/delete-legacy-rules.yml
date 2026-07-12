@@ -1,0 +1,25 @@
+# Tombstone. Removes the two Grafana-managed SQL alert rules that used to live
+# in this directory (rules.yml, deleted).
+#
+# Why they went: they duplicated Prometheus rules in alerts/heraldq.rules.yml —
+# "Worker stalled" restated HeraldQQueueLagging/HeraldQQueueStalled, and "DLQ
+# growth spike" restated HeraldQDeadLetterSpike. Two alerting systems watching
+# the same conditions through two different datasources is worse than one: they
+# can disagree (the SQL version even read graphile_worker._private_jobs while
+# the metrics poller reads the public `jobs` view), and neither is authoritative.
+# Alerting now has one home: alerts/heraldq.rules.yml, evaluated by Prometheus
+# locally and by Grafana Cloud's ruler in production.
+#
+# Why this file has to exist at all: deleting a provisioning file does NOT
+# remove the rules from a Grafana that already loaded them — they persist in its
+# database. `deleteRules` is the documented way to actually retract them.
+#
+# Safe to delete once every Grafana instance that ever loaded rules.yml has
+# started at least once with this file present.
+apiVersion: 1
+
+deleteRules:
+  - orgId: 1
+    uid: heraldq-worker-stalled
+  - orgId: 1
+    uid: heraldq-dlq-spike

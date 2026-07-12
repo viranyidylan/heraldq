@@ -3,18 +3,22 @@
 //! Two knobs, both env-driven so deploys configure them without rebuilds:
 //! - `LOG_FORMAT=json` switches logs to one-JSON-object-per-line for log
 //!   aggregators; anything else keeps the human-readable format.
-//! - `METRICS_PORT=<port>` exposes Prometheus metrics on `0.0.0.0:<port>/metrics`.
+//! - `METRICS_PORT=<port>` exposes Prometheus metrics on `[::]:<port>/metrics`.
 //!   Unset, the exporter is skipped and every `metrics::` macro in the code
 //!   becomes a no-op — safe for local dev, loud enough in the logs to notice
 //!   in production. Each binary is its own process, so give each its own port.
+//! - `METRICS_BIND=<ip>` overrides the metrics bind address (default `::`).
+//!   Rarely needed; see `DEFAULT_METRICS_BIND`.
 
 use axum::{
     extract::{MatchedPath, Request},
+    http::Method,
     middleware::Next,
     response::Response,
 };
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder};
 use sqlx::PgPool;
+use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -41,9 +45,25 @@ pub fn init_tracing() {
 pub enum TelemetryError {
     #[error("METRICS_PORT is not a valid port number: {0}")]
     BadPort(String),
+    #[error("METRICS_BIND is not a valid IP address: {0}")]
+    BadBind(String),
     #[error("failed to install Prometheus exporter: {0}")]
     Exporter(#[from] metrics_exporter_prometheus::BuildError),
 }
+
+/// Default bind address for the metrics listener: `::` (dual-stack), not
+/// `0.0.0.0`.
+///
+/// Railway's private network is IPv6-only — `<service>.railway.internal`
+/// resolves to AAAA records only, so a listener bound to `0.0.0.0` accepts
+/// nothing from it and a collector can never scrape us. On Linux, `::` still
+/// accepts IPv4 (the kernel default is `net.ipv6.bindv6only=0`, and the
+/// exporter binds with plain `std::net::TcpListener`, which does not set
+/// `IPV6_V6ONLY`), so `curl localhost:9464/metrics` keeps working unchanged.
+///
+/// Override with `METRICS_BIND=0.0.0.0` in an environment with IPv6 disabled at
+/// the netns level, where binding `::` would fail outright.
+const DEFAULT_METRICS_BIND: &str = "::";
 
 /// API latency buckets, in seconds. The API only validates and enqueues, so
 /// the interesting range is sub-millisecond to ~1s; anything past that is
@@ -78,8 +98,15 @@ pub fn init_metrics() -> Result<(), TelemetryError> {
         .parse()
         .map_err(|_| TelemetryError::BadPort(raw_port))?;
 
+    let raw_bind =
+        std::env::var("METRICS_BIND").unwrap_or_else(|_| DEFAULT_METRICS_BIND.to_owned());
+    let host: IpAddr = raw_bind
+        .parse()
+        .map_err(|_| TelemetryError::BadBind(raw_bind.clone()))?;
+    let listen = SocketAddr::new(host, port);
+
     PrometheusBuilder::new()
-        .with_http_listener(([0, 0, 0, 0], port))
+        .with_http_listener(listen)
         .set_buckets_for_metric(
             Matcher::Full("heraldq_http_request_duration_seconds".to_owned()),
             API_LATENCY_BUCKETS,
@@ -90,7 +117,7 @@ pub fn init_metrics() -> Result<(), TelemetryError> {
         )?
         .install()?;
 
-    info!(port, "Prometheus exporter listening on /metrics");
+    info!(%listen, "Prometheus exporter listening on /metrics");
     Ok(())
 }
 
@@ -98,6 +125,33 @@ pub fn init_metrics() -> Result<(), TelemetryError> {
 /// (scanners probing random paths) would mint an unbounded number of time
 /// series — the same cardinality blowup `MatchedPath` exists to prevent.
 const UNMATCHED_PATH: &str = "unknown";
+
+/// Label value for methods outside the standard set.
+const OTHER_METHOD: &str = "other";
+
+/// Collapse the request method onto a closed set.
+///
+/// `http::Method` is *not* an enum of the seven verbs — it has an
+/// `ExtensionInline` variant that accepts any valid HTTP token, so `PROPFIND`,
+/// `MOO`, or any junk a scanner invents parses fine and reaches this middleware.
+/// Calling `.to_string()` on it would put caller-controlled input straight into
+/// a Prometheus label: one permanent time series per token, forever. Same
+/// cardinality hazard `MatchedPath` guards against on `path`, one label over.
+///
+/// Returning `&'static str` is the point — the type makes it impossible to leak
+/// a request-derived string into the label by accident.
+fn method_label(method: &Method) -> &'static str {
+    match *method {
+        Method::GET => "GET",
+        Method::POST => "POST",
+        Method::PUT => "PUT",
+        Method::PATCH => "PATCH",
+        Method::DELETE => "DELETE",
+        Method::HEAD => "HEAD",
+        Method::OPTIONS => "OPTIONS",
+        _ => OTHER_METHOD,
+    }
+}
 
 /// Axum middleware exporting the API's RED metrics:
 ///
@@ -114,7 +168,7 @@ const UNMATCHED_PATH: &str = "unknown";
 /// than adding to it.
 pub async fn track_metrics(req: Request, next: Next) -> Response {
     // Read what we need before `next.run` takes ownership of the request.
-    let method = req.method().to_string();
+    let method = method_label(req.method());
     let path = req
         .extensions()
         .get::<MatchedPath>()
@@ -130,7 +184,7 @@ pub async fn track_metrics(req: Request, next: Next) -> Response {
 
     metrics::counter!(
         "heraldq_http_requests_total",
-        "method" => method.clone(),
+        "method" => method,
         "path" => path.clone(),
         "status" => status,
     )

@@ -1,0 +1,29 @@
+# Local Prometheus for HeraldQ. Scrapes the api and worker directly and
+# evaluates the same alert rules that Grafana Cloud's ruler evaluates in prod
+# (alerts/heraldq.rules.yml is the single source of truth for both).
+#
+# Start with: bash observability/prometheus.sh   →   http://localhost:9090
+#
+# There is deliberately no Alertmanager here. Locally, a firing rule shows up
+# on http://localhost:9090/alerts, which is all you need to prove a rule works.
+# Routing alerts to a human is a production concern and lives in Grafana Cloud.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Paths are resolved relative to this file's directory.
+rule_files:
+  - ../../alerts/heraldq.rules.yml
+
+# Each binary is its own process with its own METRICS_PORT. The job names are
+# load-bearing: HeraldQTargetDown alerts on `up{job=~"heraldq-.*"} == 0`, so a
+# rename here silently disables that alert.
+scrape_configs:
+  - job_name: heraldq-api
+    static_configs:
+      - targets: ["localhost:9464"]
+
+  - job_name: heraldq-worker
+    static_configs:
+      - targets: ["localhost:9465"]
