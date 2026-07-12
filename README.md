@@ -52,8 +52,8 @@ You may need to run scripts/setup_db.sh to initialize the DB and user
 Set `DATABASE_URL` (defaults to `postgres://postgres:xi23pe@localhost/sliq`), then:
 
 ```bash
-cargo run --bin api     # starts on PORT (default 3000)
-cargo run --bin worker
+METRICS_PORT=9464 cargo run --bin api     # starts on PORT (default 3000)
+METRICS_PORT=9465 cargo run --bin worker
 ```
 
 Both binaries are also containerised — see `Dockerfile.api` and `Dockerfile.worker`.
@@ -61,9 +61,9 @@ Both binaries are also containerised — see `Dockerfile.api` and `Dockerfile.wo
 To sign up and receive an API key
 
 ```bash
-curl -X POST your-service.com/signup \
+curl -X POST your-service.com/v1/signup \
   -H 'Content-Type: application/json' \
-  -d '{"name": "My Company", "invite_code":"BETA-XXXX" }'
+  -d '{"name": "My Company", "email": "you@example.com", "invite_code":"BETA-XXXX" }'
 ```
 
 Example payload

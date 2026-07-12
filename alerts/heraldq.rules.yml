@@ -76,6 +76,43 @@ groups:
             down or wedged, Postgres contention, or intake far beyond
             capacity.
 
+      # The API is the tenant-facing front door: a 5xx here means we rejected
+      # a webhook the customer believes they handed us. 4xx is deliberately
+      # excluded — bad keys and malformed payloads are the caller's problem and
+      # would drown the signal. Ratio, not absolute count, so the threshold
+      # holds at any traffic level.
+      - alert: HeraldQApiErrorRate
+        expr: >-
+          sum(rate(heraldq_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(heraldq_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HeraldQ API is returning 5xx to tenants"
+          description: >-
+            {{ $value | humanizePercentage }} of API requests are failing with
+            5xx over the last 5m. Intake is degraded — webhooks are being
+            rejected at the door. Check api logs (each carries a request_id)
+            and Postgres health.
+
+      # Latency is the other half of the front-door SLO: the API only enqueues,
+      # so p99 should sit in single-digit milliseconds. A second means Postgres
+      # contention or pool exhaustion, and callers will start timing out.
+      - alert: HeraldQApiLatencyHigh
+        expr: >-
+          histogram_quantile(0.99,
+            sum by (le) (rate(heraldq_http_request_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HeraldQ API p99 latency is above 1s"
+          description: >-
+            p99 request latency is {{ $value | humanizeDuration }}. The API does
+            little more than validate and enqueue, so this points at the DB pool
+            or Postgres itself rather than handler work.
+
       # No scrape = no metrics = every rule above is blind. Alert on the
       # blindness itself.
       - alert: HeraldQTargetDown
