@@ -69,12 +69,55 @@ curl -X POST your-service.com/v1/signup \
 Example payload
 
 ```bash
-curl -w "%{http_code}\n" 
-    -X POST http://localhost:3000/webhook     
-    -H "Authorization: Bearer $SLIQ_KEY"     
-    -H "Content-Type: application/json"     
-    -d '{ "payload": {"hello": "dyl" }, "destination": "http://localhost:3000/mock" }'
+curl -w "%{http_code}\n" \
+    -X POST http://localhost:3000/v1/webhook \
+    -H "Authorization: Bearer $SLIQ_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{ "payload": {"hello": "dyl" }, "destination": "https://httpbin.org/status/200" }'
 ```
+
+Note the destination must be publicly routable — the SSRF guard rejects
+localhost and private IPs, so `http://localhost:3000/mock` is refused with a
+400. That is the guard working, not a bug.
+
+## Observability
+
+Both binaries export Prometheus metrics on `/metrics` when `METRICS_PORT` is
+set. **Unset, every `metrics::` macro silently becomes a no-op** — so a process
+with no `METRICS_PORT` is invisible, not merely quiet.
+
+The full local stack is four processes:
+
+```bash
+METRICS_PORT=9464 cargo run --bin api      # :3000, metrics on :9464
+METRICS_PORT=9465 cargo run --bin worker   #        metrics on :9465
+bash observability/prometheus.sh           # :9090 — scrapes both, evaluates alerts/
+bash observability/grafana.sh              # :3001 — the dashboard
+```
+
+Then open **http://localhost:3001/d/heraldq-overview**.
+
+- `http://localhost:9090/targets` — both jobs should be UP. A DOWN target means
+  that process is stopped or has no `METRICS_PORT`.
+- `http://localhost:9090/alerts` — the rules in `alerts/heraldq.rules.yml`,
+  live. This is the same file Grafana Cloud's ruler evaluates in production, so
+  a rule proven here is proven in prod.
+
+### Why two datasources
+
+The dashboard queries Prometheus **and** Postgres, on purpose. They answer
+different classes of question and neither can do the other's job:
+
+| | Prometheus | Postgres |
+|---|---|---|
+| Answers | rates, percentiles, queue depth over time | which endpoint failed, what's in the DLQ, per-tenant history |
+| Cardinality | bounded — labels are a closed set | unbounded by design |
+| Used for | alerting, "is it healthy right now" | forensics, "what exactly happened" |
+
+A per-endpoint failure leaderboard as a Prometheus label would be one time
+series per customer URL — a cardinality bomb. It lives in SQL. Conversely, a
+fleet-wide p99 cannot be computed from SQL rows at scrape speed. Route each
+question to the store that can answer it.
 
 ## Tracing 
 Add `debug!` and `trace!` calls at the points you care about — payload contents, retry decisions, response bodies. These are your "`printf` but permanent." The convention:

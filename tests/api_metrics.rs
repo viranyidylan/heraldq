@@ -1,13 +1,25 @@
 //! Guards the API's RED metrics, and above all their *cardinality*.
 //!
-//! The middleware labels requests by axum's matched route template, not by the
-//! concrete URI. If someone ever swaps `MatchedPath` for `uri().path()`, every
-//! webhook ULID becomes its own Prometheus time series and the scrape target
-//! falls over. That regression is silent — the code still compiles, the metric
-//! still exports, and nothing breaks until production melts. These tests are
+//! Two of the three labels on `heraldq_http_requests_total` are derived from
+//! caller-controlled input, and both would be unbounded if taken raw:
+//!
+//! - `path` — swap `MatchedPath` for `uri().path()` and every webhook ULID
+//!   becomes its own time series.
+//! - `method` — `http::Method` is not an enum of the seven verbs; it has an
+//!   `ExtensionInline` variant accepting any HTTP token, so `.to_string()` mints
+//!   a series per verb a scanner invents.
+//!
+//! Both regressions are silent: the code compiles, the metric exports, and
+//! nothing breaks until the scrape target melts in production. These tests are
 //! the tripwire.
 
-use axum::{Router, body::Body, http::Request, middleware, routing::get};
+use axum::{
+    Router,
+    body::Body,
+    http::{Method, Request},
+    middleware,
+    routing::get,
+};
 use metrics_util::debugging::{DebugValue, DebuggingRecorder};
 use sliq::telemetry::track_metrics;
 use tower::ServiceExt;
@@ -20,7 +32,7 @@ use tower::ServiceExt;
 /// parallel threads within a single process, so a global install would have
 /// tests clobbering each other. A current-thread runtime keeps the request
 /// future on the same thread the recorder is bound to.
-fn labels_for(uri: &str) -> Vec<(String, String)> {
+fn labels_for_method(method: Method, uri: &str) -> Vec<(String, String)> {
     let app = Router::new()
         .route("/v1/webhook/{id}", get(|| async { "ok" }))
         .layer(middleware::from_fn(track_metrics));
@@ -36,6 +48,7 @@ fn labels_for(uri: &str) -> Vec<(String, String)> {
     metrics::with_local_recorder(&recorder, || {
         rt.block_on(async {
             let req = Request::builder()
+                .method(method)
                 .uri(uri)
                 .body(Body::empty())
                 .expect("build request");
@@ -58,6 +71,15 @@ fn labels_for(uri: &str) -> Vec<(String, String)> {
                 .collect()
         })
         .expect("no heraldq_http_requests_total counter was recorded")
+}
+
+fn labels_for(uri: &str) -> Vec<(String, String)> {
+    labels_for_method(Method::GET, uri)
+}
+
+/// `Method::from_bytes` accepts any valid HTTP token, which is the whole point.
+fn junk_method(token: &str) -> Method {
+    Method::from_bytes(token.as_bytes()).expect("a valid HTTP token")
 }
 
 fn label(labels: &[(String, String)], name: &str) -> String {
@@ -116,4 +138,50 @@ fn counter_carries_method_and_status() {
     let labels = labels_for("/v1/webhook/01KX9K6AD5FRHNYEHNM3E3GNHV");
     assert_eq!(label(&labels, "method"), "GET");
     assert_eq!(label(&labels, "status"), "200");
+}
+
+/// The `method` label is the *other* unbounded source, and the easy one to miss:
+/// `http::Method` is not an enum of the seven verbs — it has an `ExtensionInline`
+/// variant that accepts any HTTP token. `PROPFIND`, `MOO`, anything. Left raw,
+/// a scanner spraying junk verbs mints one permanent time series per verb.
+#[test]
+fn junk_method_collapses_to_other() {
+    let labels = labels_for_method(junk_method("MOO"), "/v1/webhook/01KX9K6AD5FRHNYEHNM3E3GNHV");
+
+    let method = label(&labels, "method");
+    assert_eq!(method, "other", "non-standard methods must collapse");
+    assert!(
+        !method.contains("MOO"),
+        "the raw method token leaked into the `method` label — this is a \
+         cardinality explosion, one time series per verb a scanner invents"
+    );
+}
+
+/// As with the route template: collapsing is only useful if distinct junk verbs
+/// land on the *same* series. The assertion above would still pass if each verb
+/// mapped to some other unique constant.
+#[test]
+fn distinct_junk_methods_share_one_series() {
+    let a = labels_for_method(junk_method("MOO"), "/v1/webhook/01KX9K6AD5FRHNYEHNM3E3GNHV");
+    let b = labels_for_method(
+        junk_method("PROPFIND"),
+        "/v1/webhook/01KX9K6AD5FRHNYEHNM3E3GNHV",
+    );
+
+    assert_eq!(
+        label(&a, "method"),
+        label(&b, "method"),
+        "different junk verbs must share a single time series"
+    );
+}
+
+/// ...while the standard verbs must still pass through distinctly — collapsing
+/// everything to "other" would be "safe" and useless.
+#[test]
+fn standard_methods_are_preserved() {
+    let get = labels_for_method(Method::GET, "/v1/webhook/01KX9K6AD5FRHNYEHNM3E3GNHV");
+    let post = labels_for_method(Method::POST, "/v1/webhook/01KX9K6AD5FRHNYEHNM3E3GNHV");
+
+    assert_eq!(label(&get, "method"), "GET");
+    assert_eq!(label(&post, "method"), "POST");
 }

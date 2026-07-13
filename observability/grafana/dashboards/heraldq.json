@@ -1,27 +1,517 @@
 {
   "uid": "heraldq-overview",
-  "title": "HeraldQ — Delivery Monitoring",
-  "tags": ["heraldq"],
+  "title": "HeraldQ \u2014 Service Overview",
+  "tags": [
+    "heraldq"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 4,
+  "version": 5,
   "refresh": "30s",
-  "time": { "from": "now-90d", "to": "now" },
-  "templating": { "list": [] },
-  "annotations": { "list": [] },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
   "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "API \u2014 front door  \u00b7  Prometheus",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 101,
+      "type": "timeseries",
+      "title": "Request rate (by route)",
+      "description": "Requests/sec per route template. The 'R' in RED. Route templates, never concrete URIs \u2014 see track_metrics in src/telemetry.rs.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "sum by (path) (rate(heraldq_http_requests_total[5m]))",
+          "legendFormat": "{{path}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "type": "timeseries",
+      "title": "Error rate  (5xx ratio)",
+      "description": "The 'E' in RED, and the HeraldQApiErrorRate alert's exact expression. 4xx is shown for context only and is deliberately NOT alerted: bad keys and malformed payloads are the caller's problem and would drown the signal. The dashed line is the 5% alert threshold.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "sum(rate(heraldq_http_requests_total{status=~\"5..\"}[5m])) / sum(rate(heraldq_http_requests_total[5m]))",
+          "legendFormat": "5xx  (pages)",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "sum(rate(heraldq_http_requests_total{status=~\"4..\"}[5m])) / sum(rate(heraldq_http_requests_total[5m]))",
+          "legendFormat": "4xx  (context only)",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "type": "timeseries",
+      "title": "Latency p50 / p99 (by route)",
+      "description": "The 'D' in RED. Computed from histogram buckets, not summary quantiles \u2014 bucket counts are aggregatable across replicas, pre-computed quantiles are not (you cannot average p99s). HeraldQApiLatencyHigh fires on p99 > 1s.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, path) (rate(heraldq_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{path}}",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le, path) (rate(heraldq_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50 {{path}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 110,
+      "type": "row",
+      "title": "Delivery pipeline  \u00b7  Prometheus",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 111,
+      "type": "timeseries",
+      "title": "Delivery outcomes /sec",
+      "description": "Live throughput by outcome. Retries are counted per attempt, so a retry storm that eventually succeeds shows here and nowhere else. HeraldQDeadLetterSpike fires on the dead-lettered rate.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "rate(heraldq_webhooks_delivered_total[5m])",
+          "legendFormat": "delivered",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "rate(heraldq_webhook_attempts_retried_total[5m])",
+          "legendFormat": "retried (per attempt)",
+          "range": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "rate(heraldq_webhooks_dead_lettered_total[5m])",
+          "legendFormat": "dead-lettered",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 112,
+      "type": "timeseries",
+      "title": "Delivery duration p50 / p99",
+      "description": "Time for the outbound POST to the customer endpoint. NOT end-to-end: this excludes queue wait. For the number a customer actually experiences, see 'Sent \u2192 received latency' in the forensics row, which measures delivered_at - enqueued_at.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(heraldq_webhook_delivery_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(heraldq_webhook_delivery_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 120,
+      "type": "row",
+      "title": "Queue health  \u00b7  Prometheus",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 121,
+      "type": "timeseries",
+      "title": "Queue depth over time",
+      "description": "Runnable jobs: due, unclaimed, not retry-exhausted. Complements the SQL 'Queue depth (now)' tile below, which can only ever show the current instant \u2014 this shows whether depth is trending up or draining.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "heraldq_queue_depth",
+          "legendFormat": "runnable jobs",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 122,
+      "type": "timeseries",
+      "title": "Oldest job age  (head-of-line wait)",
+      "description": "THE backpressure signal, and what HeraldQQueueLagging (>60s) and HeraldQQueueStalled (>600s) fire on. Depth can spike harmlessly if workers drain it; age climbing means we are falling behind. Dashed lines are the two alert thresholds.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 600
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "heraldq_queue_oldest_job_age_seconds",
+          "legendFormat": "oldest runnable job",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 130,
+      "type": "row",
+      "title": "Delivery forensics  \u00b7  Postgres",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "collapsed": false,
+      "panels": []
+    },
     {
       "id": 1,
       "type": "stat",
       "title": "Delivered (window)",
       "description": "Successful deliveries in the selected time range.",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "heraldq-pg" },
-      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 25
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "heraldq-pg"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
       "targets": [
-        { "refId": "A", "datasource": { "type": "postgres", "uid": "heraldq-pg" }, "format": "table", "rawQuery": true,
-          "rawSql": "SELECT count(*) AS value FROM webhook_deliveries WHERE $__timeFilter(delivered_at)" }
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "heraldq-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS value FROM webhook_deliveries WHERE $__timeFilter(delivered_at)"
+        }
       ]
     },
     {
@@ -29,27 +519,47 @@
       "type": "stat",
       "title": "Dead-lettered (window)",
       "description": "Webhooks that exhausted retries or permanently failed, in range.",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "heraldq-pg" },
-      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] },
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 25
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "heraldq-pg"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
       "targets": [
-        { "refId": "A", "datasource": { "type": "postgres", "uid": "heraldq-pg" }, "format": "table", "rawQuery": true,
-          "rawSql": "SELECT count(*) AS value FROM dead_letter_queue WHERE $__timeFilter(abandoned_at)" }
-      ]
-    },
-    {
-      "id": 3,
-      "type": "stat",
-      "title": "Queue depth (now)",
-      "description": "Live jobs in graphile_worker: ready = runnable now, in-flight = locked by a worker, scheduled = waiting on retry backoff.",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "heraldq-pg" },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 100 }, { "color": "red", "value": 1000 } ] } }, "overrides": [] },
-      "options": { "colorMode": "value", "graphMode": "none", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
-      "targets": [
-        { "refId": "A", "datasource": { "type": "postgres", "uid": "heraldq-pg" }, "format": "table", "rawQuery": true,
-          "rawSql": "SELECT count(*) FILTER (WHERE locked_at IS NULL AND run_at <= now()) AS ready, count(*) FILTER (WHERE locked_at IS NOT NULL) AS \"in-flight\", count(*) FILTER (WHERE run_at > now()) AS scheduled FROM graphile_worker.jobs" }
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "heraldq-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS value FROM dead_letter_queue WHERE $__timeFilter(abandoned_at)"
+        }
       ]
     },
     {
@@ -57,57 +567,337 @@
       "type": "stat",
       "title": "Success rate (window)",
       "description": "delivered / (delivered + dead-lettered) over the selected range.",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "heraldq-pg" },
-      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 90 }, { "color": "green", "value": 99 } ] } }, "overrides": [] },
-      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 25
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "heraldq-pg"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 90
+              },
+              {
+                "color": "green",
+                "value": 99
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
       "targets": [
-        { "refId": "A", "datasource": { "type": "postgres", "uid": "heraldq-pg" }, "format": "table", "rawQuery": true,
-          "rawSql": "SELECT round(100.0 * d.c / nullif(d.c + f.c, 0), 2) AS value FROM (SELECT count(*) c FROM webhook_deliveries WHERE $__timeFilter(delivered_at)) d, (SELECT count(*) c FROM dead_letter_queue WHERE $__timeFilter(abandoned_at)) f" }
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "heraldq-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT round(100.0 * d.c / nullif(d.c + f.c, 0), 2) AS value FROM (SELECT count(*) c FROM webhook_deliveries WHERE $__timeFilter(delivered_at)) d, (SELECT count(*) c FROM dead_letter_queue WHERE $__timeFilter(abandoned_at)) f"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Queue depth (now)",
+      "description": "Live jobs in graphile_worker: ready = runnable now, in-flight = locked by a worker, scheduled = waiting on retry backoff.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 25
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "heraldq-pg"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 100
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "heraldq-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) FILTER (WHERE locked_at IS NULL AND run_at <= now()) AS ready, count(*) FILTER (WHERE locked_at IS NOT NULL) AS \"in-flight\", count(*) FILTER (WHERE run_at > now()) AS scheduled FROM graphile_worker.jobs"
+        }
       ]
     },
     {
       "id": 5,
       "type": "timeseries",
-      "title": "Throughput — delivered vs dead-lettered",
+      "title": "Throughput \u2014 delivered vs dead-lettered",
       "description": "Counts bucketed over time. Delivered keyed on delivered_at, failures on abandoned_at.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-      "datasource": { "type": "postgres", "uid": "heraldq-pg" },
-      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } } }, "overrides": [ { "matcher": { "id": "byName", "options": "dead-lettered" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }, { "matcher": { "id": "byName", "options": "delivered" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] } ] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "heraldq-pg"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "dead-lettered"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "delivered"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
-        { "refId": "A", "datasource": { "type": "postgres", "uid": "heraldq-pg" }, "format": "time_series", "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(delivered_at, $__interval), count(*) AS delivered FROM webhook_deliveries WHERE $__timeFilter(delivered_at) GROUP BY 1 ORDER BY 1" },
-        { "refId": "B", "datasource": { "type": "postgres", "uid": "heraldq-pg" }, "format": "time_series", "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(abandoned_at, $__interval), count(*) AS \"dead-lettered\" FROM dead_letter_queue WHERE $__timeFilter(abandoned_at) GROUP BY 1 ORDER BY 1" }
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "heraldq-pg"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(delivered_at, $__interval), count(*) AS delivered FROM webhook_deliveries WHERE $__timeFilter(delivered_at) GROUP BY 1 ORDER BY 1"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "postgres",
+            "uid": "heraldq-pg"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(abandoned_at, $__interval), count(*) AS \"dead-lettered\" FROM dead_letter_queue WHERE $__timeFilter(abandoned_at) GROUP BY 1 ORDER BY 1"
+        }
       ]
     },
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Sent → received latency (delivery time)",
+      "title": "Sent \u2192 received latency (delivery time)",
       "description": "End-to-end queue+delivery latency per bucket: delivered_at - enqueued_at. avg and max.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-      "datasource": { "type": "postgres", "uid": "heraldq-pg" },
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 29
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "heraldq-pg"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
-        { "refId": "A", "datasource": { "type": "postgres", "uid": "heraldq-pg" }, "format": "time_series", "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(delivered_at, $__interval), avg(extract(epoch FROM delivered_at - enqueued_at)) AS \"avg latency\", max(extract(epoch FROM delivered_at - enqueued_at)) AS \"max latency\" FROM webhook_deliveries WHERE $__timeFilter(delivered_at) GROUP BY 1 ORDER BY 1" }
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "heraldq-pg"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(delivered_at, $__interval), avg(extract(epoch FROM delivered_at - enqueued_at)) AS \"avg latency\", max(extract(epoch FROM delivered_at - enqueued_at)) AS \"max latency\" FROM webhook_deliveries WHERE $__timeFilter(delivered_at) GROUP BY 1 ORDER BY 1"
+        }
       ]
     },
     {
       "id": 7,
       "type": "stat",
       "title": "Latency percentiles (window)",
-      "description": "Distribution of sent→received latency over the range.",
-      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 12 },
-      "datasource": { "type": "postgres", "uid": "heraldq-pg" },
-      "fieldConfig": { "defaults": { "unit": "s", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 10 }, { "color": "red", "value": 60 } ] } }, "overrides": [] },
-      "options": { "colorMode": "value", "graphMode": "none", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "description": "Distribution of sent\u2192received latency over the range.",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 37
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "heraldq-pg"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
       "targets": [
-        { "refId": "A", "datasource": { "type": "postgres", "uid": "heraldq-pg" }, "format": "table", "rawQuery": true,
-          "rawSql": "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM delivered_at - enqueued_at)) AS p50, percentile_cont(0.95) WITHIN GROUP (ORDER BY extract(epoch FROM delivered_at - enqueued_at)) AS p95, percentile_cont(0.99) WITHIN GROUP (ORDER BY extract(epoch FROM delivered_at - enqueued_at)) AS p99 FROM webhook_deliveries WHERE $__timeFilter(delivered_at)" }
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "heraldq-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM delivered_at - enqueued_at)) AS p50, percentile_cont(0.95) WITHIN GROUP (ORDER BY extract(epoch FROM delivered_at - enqueued_at)) AS p95, percentile_cont(0.99) WITHIN GROUP (ORDER BY extract(epoch FROM delivered_at - enqueued_at)) AS p99 FROM webhook_deliveries WHERE $__timeFilter(delivered_at)"
+        }
       ]
     },
     {
@@ -115,41 +905,278 @@
       "type": "piechart",
       "title": "Failure modes (window)",
       "description": "Dead-letter reasons. Old rows with no reason recorded show as 'unknown'.",
-      "gridPos": { "h": 8, "w": 8, "x": 6, "y": 12 },
-      "datasource": { "type": "postgres", "uid": "heraldq-pg" },
-      "fieldConfig": { "defaults": {}, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "values": ["value", "percent"] }, "pieType": "donut", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true } },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 6,
+        "y": 37
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "heraldq-pg"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": true
+        }
+      },
       "targets": [
-        { "refId": "A", "datasource": { "type": "postgres", "uid": "heraldq-pg" }, "format": "table", "rawQuery": true,
-          "rawSql": "SELECT coalesce(nullif(failure_reason, ''), 'unknown') AS reason, count(*) AS count FROM dead_letter_queue WHERE $__timeFilter(abandoned_at) GROUP BY 1 ORDER BY 2 DESC" }
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "heraldq-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT coalesce(nullif(failure_reason, ''), 'unknown') AS reason, count(*) AS count FROM dead_letter_queue WHERE $__timeFilter(abandoned_at) GROUP BY 1 ORDER BY 2 DESC"
+        }
       ]
     },
     {
       "id": 9,
       "type": "barchart",
-      "title": "Retry distribution — attempts by outcome",
+      "title": "Retry distribution \u2014 attempts by outcome",
       "description": "Attempts taken to reach a terminal state. delivered/dead-lettered come from the stored attempts column (populated for new traffic; old rows predate it); in-flight is current graphile_worker jobs. A right-shifted distribution means endpoints are forcing retries.",
-      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 12 },
-      "datasource": { "type": "postgres", "uid": "heraldq-pg" },
-      "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" } } }, "overrides": [ { "matcher": { "id": "byName", "options": "delivered" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] }, { "matcher": { "id": "byName", "options": "dead-lettered" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }, { "matcher": { "id": "byName", "options": "in-flight" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } } ] } ] },
-      "options": { "xField": "attempt", "stacking": "normal", "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 14,
+        "y": 37
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "heraldq-pg"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "delivered"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "dead-lettered"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "in-flight"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "attempt",
+        "stacking": "normal",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
-        { "refId": "A", "datasource": { "type": "postgres", "uid": "heraldq-pg" }, "format": "table", "rawQuery": true,
-          "rawSql": "SELECT attempt, sum(delivered) AS delivered, sum(dead_lettered) AS \"dead-lettered\", sum(in_flight) AS \"in-flight\" FROM ( SELECT attempts AS attempt, count(*) AS delivered, 0 AS dead_lettered, 0 AS in_flight FROM webhook_deliveries WHERE attempts IS NOT NULL GROUP BY 1 UNION ALL SELECT attempts, 0, count(*), 0 FROM dead_letter_queue WHERE attempts IS NOT NULL GROUP BY 1 UNION ALL SELECT attempts, 0, 0, count(*) FROM graphile_worker.jobs GROUP BY 1 ) t GROUP BY attempt ORDER BY attempt" }
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "heraldq-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT attempt, sum(delivered) AS delivered, sum(dead_lettered) AS \"dead-lettered\", sum(in_flight) AS \"in-flight\" FROM ( SELECT attempts AS attempt, count(*) AS delivered, 0 AS dead_lettered, 0 AS in_flight FROM webhook_deliveries WHERE attempts IS NOT NULL GROUP BY 1 UNION ALL SELECT attempts, 0, count(*), 0 FROM dead_letter_queue WHERE attempts IS NOT NULL GROUP BY 1 UNION ALL SELECT attempts, 0, 0, count(*) FROM graphile_worker.jobs GROUP BY 1 ) t GROUP BY attempt ORDER BY attempt"
+        }
       ]
     },
     {
       "id": 10,
       "type": "table",
-      "title": "Bad endpoints — failure leaderboard (all time)",
-      "description": "Destinations ranked by failures, with fail %. High-cardinality by design — this is why it lives in SQL, not a Prometheus label.",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 20 },
-      "datasource": { "type": "postgres", "uid": "heraldq-pg" },
-      "fieldConfig": { "defaults": {}, "overrides": [ { "matcher": { "id": "byName", "options": "fail %" }, "properties": [ { "id": "unit", "value": "percent" }, { "id": "custom.cellOptions", "value": { "type": "color-background" } }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 25 } ] } } ] } ] },
-      "options": { "showHeader": true, "sortBy": [ { "displayName": "failed", "desc": true } ] },
+      "title": "Bad endpoints \u2014 failure leaderboard (all time)",
+      "description": "Destinations ranked by failures, with fail %. High-cardinality by design \u2014 this is why it lives in SQL, not a Prometheus label.",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "heraldq-pg"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fail %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 5
+                    },
+                    {
+                      "color": "red",
+                      "value": 25
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "failed",
+            "desc": true
+          }
+        ]
+      },
       "targets": [
-        { "refId": "A", "datasource": { "type": "postgres", "uid": "heraldq-pg" }, "format": "table", "rawQuery": true,
-          "rawSql": "SELECT dest AS destination, sum(delivered) AS delivered, sum(failed) AS failed, round(100.0 * sum(failed) / nullif(sum(delivered) + sum(failed), 0), 1) AS \"fail %\" FROM ( SELECT destination AS dest, count(*) AS delivered, 0 AS failed FROM webhook_deliveries GROUP BY 1 UNION ALL SELECT destination, 0, count(*) FROM dead_letter_queue GROUP BY 1 ) t GROUP BY dest ORDER BY failed DESC, \"fail %\" DESC LIMIT 25" }
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "heraldq-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT dest AS destination, sum(delivered) AS delivered, sum(failed) AS failed, round(100.0 * sum(failed) / nullif(sum(delivered) + sum(failed), 0), 1) AS \"fail %\" FROM ( SELECT destination AS dest, count(*) AS delivered, 0 AS failed FROM webhook_deliveries GROUP BY 1 UNION ALL SELECT destination, 0, count(*) FROM dead_letter_queue GROUP BY 1 ) t GROUP BY dest ORDER BY failed DESC, \"fail %\" DESC LIMIT 25"
+        }
+      ]
+    },
+    {
+      "id": 140,
+      "type": "row",
+      "title": "Housekeeping  \u00b7  Prometheus",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 54
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 141,
+      "type": "timeseries",
+      "title": "Retention sweeper \u2014 rows deleted/hour",
+      "description": "The retention sweeper swallows errors with a warn! and skips the cycle, so a wedged sweeper's ONLY symptom is this line going flat while the tables keep growing. Nothing alerts on it yet; this panel is the watch.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 55
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "sum by (table) (increase(heraldq_retention_deleted_total[1h]))",
+          "legendFormat": "{{table}}",
+          "range": true
+        }
       ]
     }
   ]

@@ -7,5 +7,7 @@ providers:
     type: file
     allowUiUpdates: true
     options:
-      path: /home/dylan/dev/heraldq/observability/grafana/dashboards
+      # Exported by observability/grafana.sh. Was a hardcoded absolute path,
+      # which only ever worked on one machine.
+      path: ${HERALDQ_DASHBOARDS_PATH}
       foldersFromFilesStructure: false
