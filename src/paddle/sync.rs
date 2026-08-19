@@ -1,0 +1,172 @@
+//! Paddle → Postgres state sync.
+//!
+//! Every function here is idempotent: Paddle delivers webhooks at-least-once
+//! with the same `event_id` on every retry, and `subscription.updated` can
+//! arrive before its `subscription.created` if the first delivery is still
+//! being retried. Upserts keyed on the Paddle resource id converge to the
+//! latest state regardless of arrival order or duplication.
+
+use chrono::{DateTime, Utc};
+
+use crate::paddle::events::{CustomerPayload, SubscriptionPayload};
+
+/// Values allowed in `tenants.tier` (the Postgres `account_tier` enum).
+/// Anything else in a price's `custom_data.tier` is ignored rather than
+/// written — an invalid enum value would make the statement error forever,
+/// and Paddle would retry a permanently-failing event to exhaustion.
+const VALID_TIERS: [&str; 4] = ["free", "basic", "professional", "enterprise"];
+
+/// Record an event id in the dedup ledger.
+///
+/// Returns `Ok(true)` the first time this id is seen, `Ok(false)` when it was
+/// already processed (a redelivery). This is the "have we done this?" gate:
+/// callers ack immediately on `false` without touching anything else.
+///
+/// Runs inside the caller's transaction so that a processing failure rolls
+/// the ledger entry back too — otherwise a redelivery would be deduped away
+/// before its work ever succeeded.
+pub async fn record_event(
+    conn: &mut sqlx::PgConnection,
+    event_id: &str,
+    event_type: &str,
+    occurred_at: Option<DateTime<Utc>>,
+) -> Result<bool, sqlx::Error> {
+    let inserted = sqlx::query!(
+        r#"INSERT INTO paddle_processed_events (event_id, event_type, occurred_at)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (event_id) DO NOTHING
+            RETURNING event_id"#,
+        event_id,
+        event_type,
+        occurred_at,
+    )
+    .fetch_optional(conn)
+    .await?;
+
+    Ok(inserted.is_some())
+}
+
+/// Mirror a Paddle customer. The tenant link is resolved by email here —
+/// not at signup — because the Paddle customer may be created before any
+/// heraldQ tenant exists (or belong to a prospective customer who never
+/// signs up).
+pub async fn upsert_customer(
+    conn: &mut sqlx::PgConnection,
+    customer: &CustomerPayload,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"INSERT INTO paddle_customers (paddle_customer_id, email, tenant_id)
+            VALUES ($1, $2,
+                    (SELECT id FROM tenants WHERE email = $2))
+            ON CONFLICT (paddle_customer_id) DO UPDATE
+            SET email = EXCLUDED.email,
+                tenant_id = (SELECT id FROM tenants WHERE email = EXCLUDED.email),
+                updated_at = now()"#,
+        customer.id,
+        customer.email,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// Mirror a Paddle subscription, then propagate the effective tier to the
+/// linked tenant (if any).
+///
+/// A stub customer row is inserted first when the `customer.created` event
+/// hasn't landed yet — out-of-order delivery is normal under retries.
+pub async fn upsert_subscription(
+    conn: &mut sqlx::PgConnection,
+    sub: &SubscriptionPayload,
+) -> Result<(), sqlx::Error> {
+    let price = sub.primary_price();
+
+    sqlx::query!(
+        r#"INSERT INTO paddle_customers (paddle_customer_id, email)
+            VALUES ($1, '')
+            ON CONFLICT (paddle_customer_id) DO NOTHING"#,
+        sub.customer_id,
+    )
+    .execute(&mut *conn)
+    .await?;
+
+    sqlx::query!(
+        r#"INSERT INTO paddle_subscriptions (
+                paddle_subscription_id, paddle_customer_id, status, tier,
+                price_id, product_id, scheduled_change,
+                current_period_start, current_period_end,
+                canceled_at, next_billed_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (paddle_subscription_id) DO UPDATE
+            SET status = EXCLUDED.status,
+                tier = EXCLUDED.tier,
+                price_id = EXCLUDED.price_id,
+                product_id = EXCLUDED.product_id,
+                scheduled_change = EXCLUDED.scheduled_change,
+                current_period_start = EXCLUDED.current_period_start,
+                current_period_end = EXCLUDED.current_period_end,
+                canceled_at = EXCLUDED.canceled_at,
+                next_billed_at = EXCLUDED.next_billed_at,
+                updated_at = now()"#,
+        sub.id,
+        sub.customer_id,
+        sub.status,
+        sub.tier(),
+        price.map(|p| p.id.as_str()),
+        price.map(|p| p.product_id.as_str()),
+        sub.scheduled_change,
+        sub.current_billing_period.as_ref().and_then(|p| p.starts_at),
+        sub.current_billing_period.as_ref().and_then(|p| p.ends_at),
+        sub.canceled_at,
+        sub.next_billed_at,
+    )
+    .execute(&mut *conn)
+    .await?;
+
+    if let Some(effective_tier) = effective_tier(&sub.status, sub.tier()) {
+        apply_tier_to_tenant(&mut *conn, &sub.customer_id, &effective_tier).await?;
+    }
+
+    Ok(())
+}
+
+/// The tier a tenant should hold given a subscription's Paddle status.
+///
+/// `active`/`trialing` map to the price's tier; `past_due` keeps it for the
+/// dunning grace period (the tenant sees payment failures elsewhere);
+/// `paused` and `canceled` drop the tenant back to `free`. `canceled` only
+/// arrives once the paid period has actually ended, so this honors "your key
+/// keeps working to the end of the paid period".
+fn effective_tier(status: &str, price_tier: Option<String>) -> Option<String> {
+    let tier = match status {
+        "active" | "trialing" | "past_due" => price_tier?,
+        "paused" | "canceled" => "free".to_owned(),
+        _ => return None, // unknown status: touch nothing
+    };
+
+    if VALID_TIERS.contains(&tier.as_str()) {
+        Some(tier)
+    } else {
+        None
+    }
+}
+
+async fn apply_tier_to_tenant(
+    conn: &mut sqlx::PgConnection,
+    paddle_customer_id: &str,
+    tier: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"UPDATE tenants t
+            SET tier = $2::text::account_tier
+            FROM paddle_customers c
+            WHERE c.paddle_customer_id = $1
+              AND c.email <> ''
+              AND t.email = c.email"#,
+        paddle_customer_id,
+        tier,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}

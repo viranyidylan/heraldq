@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO paddle_customers (paddle_customer_id, email)\n            VALUES ($1, '')\n            ON CONFLICT (paddle_customer_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "663f7ff54c1d766fb0be07d6d11c07e9e3558113c03bd03f5c0844f76ffa471a"
+}

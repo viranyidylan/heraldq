@@ -36,7 +36,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         webhook_limiter,
         signup_limiter,
         policy: ssrf::policy(),
+        paddle_webhook_secret: config.paddle_webhook_secret.clone(),
     };
+
+    if state.paddle_webhook_secret.is_none() {
+        tracing::warn!(
+            "PADDLE_WEBHOOK_SECRET not set — /webhooks/paddle will refuse deliveries (503)"
+        );
+    }
 
     let app = routes::build(state);
 

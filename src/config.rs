@@ -5,6 +5,9 @@ pub struct AppConfig {
     pub database_url: String,
     pub schema: String,
     pub port: u16,
+    // Secret for verifying Paddle webhook signatures. Optional at parse time
+    // so the API still boots without billing configured.
+    pub paddle_webhook_secret: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -37,10 +40,15 @@ impl AppConfig {
             .parse::<u16>()
             .map_err(|_| ConfigError::MissingVar("PORT (invalid u16)".into()))?;
 
+        let paddle_webhook_secret = std::env::var("PADDLE_WEBHOOK_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty());
+
         Ok(AppConfig {
             database_url,
             schema,
             port,
+            paddle_webhook_secret,
         })
     }
 }
