@@ -115,7 +115,9 @@ pub async fn upsert_subscription(
         price.map(|p| p.id.as_str()),
         price.map(|p| p.product_id.as_str()),
         sub.scheduled_change,
-        sub.current_billing_period.as_ref().and_then(|p| p.starts_at),
+        sub.current_billing_period
+            .as_ref()
+            .and_then(|p| p.starts_at),
         sub.current_billing_period.as_ref().and_then(|p| p.ends_at),
         sub.canceled_at,
         sub.next_billed_at,

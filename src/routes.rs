@@ -24,8 +24,7 @@ use crate::{
     AppState, WebhookRequest, auth,
     db::stats::WebhookActivitySummary,
     error::AppError,
-    paddle,
-    telemetry,
+    paddle, telemetry,
     webhook::{self, ssrf::validate_destination},
 };
 
@@ -137,7 +136,10 @@ async fn paddle_webhook(
 
     let Some(secret) = state.paddle_webhook_secret.as_deref() else {
         error!("PADDLE_WEBHOOK_SECRET not set; refusing delivery so Paddle retries");
-        return Err((StatusCode::SERVICE_UNAVAILABLE, "webhook secret not configured"));
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "webhook secret not configured",
+        ));
     };
 
     let signature = headers
@@ -151,16 +153,16 @@ async fn paddle_webhook(
     // Verified against the exact bytes received — never a re-serialization.
     match paddle::signature::verify_signature(signature, &body, secret, Utc::now()) {
         Ok(()) => {}
-        Err(
-            SignatureError::MalformedHeader | SignatureError::BadTimestamp,
-        ) => return Err((StatusCode::BAD_REQUEST, "malformed signature header")),
+        Err(SignatureError::MalformedHeader | SignatureError::BadTimestamp) => {
+            return Err((StatusCode::BAD_REQUEST, "malformed signature header"));
+        }
         Err(e @ (SignatureError::StaleTimestamp | SignatureError::Mismatch)) => {
             warn!(error = %e, "paddle signature verification failed");
             return Err((StatusCode::UNAUTHORIZED, "invalid signature"));
         }
     }
 
-    let event: paddle::events::WebhookEvent = match serde_json::from_slice(&body) {
+    let event: paddle::events::PaddleEvent = match serde_json::from_slice(&body) {
         Ok(event) => event,
         Err(e) => {
             warn!(error = %e, "paddle webhook body is not a parseable event");
@@ -168,11 +170,7 @@ async fn paddle_webhook(
         }
     };
 
-    let mut tx = state
-        .pg_pool
-        .begin()
-        .await
-        .map_err(paddle_db_error)?;
+    let mut tx = state.pg_pool.begin().await.map_err(paddle_db_error)?;
     let is_new = paddle::sync::record_event(
         &mut tx,
         &event.event_id,
@@ -183,7 +181,9 @@ async fn paddle_webhook(
     .map_err(paddle_db_error)?;
 
     if is_new {
-        paddle::process_event(&mut tx, &event).await.map_err(paddle_db_error)?;
+        paddle::process_event(&mut tx, &event)
+            .await
+            .map_err(paddle_db_error)?;
     }
     tx.commit().await.map_err(paddle_db_error)?;
 

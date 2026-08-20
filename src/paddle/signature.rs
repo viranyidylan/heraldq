@@ -54,16 +54,19 @@ pub fn verify_signature(
     }
 
     // HMAC-SHA256 over "{ts}:{body}", hex-encoded, "v1:"-prefixed.
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .expect("HMAC accepts any key length");
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
     mac.update(ts.to_string().as_bytes());
     mac.update(b":");
     mac.update(raw_body);
 
-    let provided = h1.strip_prefix("v1:").ok_or(SignatureError::MalformedHeader)?;
+    let provided = h1
+        .strip_prefix("v1:")
+        .ok_or(SignatureError::MalformedHeader)?;
     let provided = hex::decode(provided).map_err(|_| SignatureError::MalformedHeader)?;
     // Constant-time comparison — verify_slice short-circuits nothing.
-    mac.verify_slice(&provided).map_err(|_| SignatureError::Mismatch)
+    mac.verify_slice(&provided)
+        .map_err(|_| SignatureError::Mismatch)
 }
 
 /// Extract `(ts, h1)` from `ts=...;h1=...`. Key order is not guaranteed, and

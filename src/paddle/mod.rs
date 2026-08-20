@@ -26,7 +26,7 @@ pub mod sync;
 use sqlx::PgConnection;
 use tracing::{error, info, warn};
 
-use crate::paddle::events::WebhookEvent;
+use crate::paddle::events::PaddleEvent;
 
 /// Dispatch a deduped event to its handler.
 ///
@@ -34,7 +34,10 @@ use crate::paddle::events::WebhookEvent;
 /// redelivery could never fix are handled inline. Unknown event types ack
 /// silently — a destination can subscribe to more events than the code
 /// handles.
-pub async fn process_event(conn: &mut PgConnection, event: &WebhookEvent) -> Result<(), sqlx::Error> {
+pub async fn process_event(
+    conn: &mut PgConnection,
+    event: &PaddleEvent,
+) -> Result<(), sqlx::Error> {
     match event.event_type.as_str() {
         "customer.created" | "customer.updated" => match event.customer() {
             Some(customer) => sync::upsert_customer(conn, &customer).await,

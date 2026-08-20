@@ -12,7 +12,7 @@
 use chrono::Utc;
 use hmac::Mac;
 use serde_json::json;
-use sliq::paddle::{events::WebhookEvent, signature::verify_signature};
+use sliq::paddle::{events::PaddleEvent, signature::verify_signature};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -69,16 +69,19 @@ fn subscription_event(customer_id: &str, status: &str, tier: Option<&str>) -> se
 /// The same work the route handler does: verify, then ledger + sync in one tx.
 /// Returns whether the event was new (vs. deduped).
 async fn deliver(pool: &PgPool, header: &str, body: &[u8]) -> bool {
-    verify_signature(header, body, SECRET, Utc::now())
-        .expect("test events are correctly signed");
+    verify_signature(header, body, SECRET, Utc::now()).expect("test events are correctly signed");
 
-    let event: WebhookEvent = serde_json::from_slice(body).expect("test events parse");
+    let event: PaddleEvent = serde_json::from_slice(body).expect("test events parse");
 
     let mut tx = pool.begin().await.unwrap();
-    let is_new =
-        sliq::paddle::sync::record_event(&mut tx, &event.event_id, &event.event_type, event.occurred_at)
-            .await
-            .unwrap();
+    let is_new = sliq::paddle::sync::record_event(
+        &mut tx,
+        &event.event_id,
+        &event.event_type,
+        event.occurred_at,
+    )
+    .await
+    .unwrap();
     if is_new {
         sliq::paddle::process_event(&mut tx, &event).await.unwrap();
     }
@@ -115,7 +118,10 @@ async fn redelivery_is_deduped(pool: PgPool) {
         customer_event("ctm_01h", "dup@test.invalid"),
     );
 
-    assert!(deliver(&pool, &header, &body).await, "first delivery is new");
+    assert!(
+        deliver(&pool, &header, &body).await,
+        "first delivery is new"
+    );
     assert!(
         !deliver(&pool, &header, &body).await,
         "redelivery is deduped"
@@ -143,12 +149,11 @@ async fn subscription_before_customer_creates_stub(pool: PgPool) {
 
     assert!(deliver(&pool, &header, &body).await);
 
-    let sub = sqlx::query!(
-        r#"SELECT status, tier::text AS tier, price_id FROM paddle_subscriptions"#
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let sub =
+        sqlx::query!(r#"SELECT status, tier::text AS tier, price_id FROM paddle_subscriptions"#)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(sub.status, "active");
     assert_eq!(sub.tier.as_deref(), Some("basic"));
     assert_eq!(sub.price_id, "pri_01h");
@@ -169,7 +174,11 @@ async fn active_subscription_upgrades_tenant_by_email(pool: PgPool) {
     let tenant_id = seed_tenant(&pool, email).await;
 
     // Customer first, so the email link exists...
-    let (h, b) = signed_event("customer.created", "evt_c1", customer_event("ctm_01h", email));
+    let (h, b) = signed_event(
+        "customer.created",
+        "evt_c1",
+        customer_event("ctm_01h", email),
+    );
     assert!(deliver(&pool, &h, &b).await);
 
     // ...then the subscription on the professional price.
@@ -198,7 +207,11 @@ async fn canceled_subscription_downgrades_tenant_to_free(pool: PgPool) {
     let email = "churn@test.invalid";
     let tenant_id = seed_tenant(&pool, email).await;
 
-    let (h, b) = signed_event("customer.created", "evt_c2", customer_event("ctm_02h", email));
+    let (h, b) = signed_event(
+        "customer.created",
+        "evt_c2",
+        customer_event("ctm_02h", email),
+    );
     deliver(&pool, &h, &b).await;
 
     let (h, b) = signed_event(
@@ -216,11 +229,12 @@ async fn canceled_subscription_downgrades_tenant_to_free(pool: PgPool) {
     deliver(&pool, &h, &b).await;
 
     assert_eq!(tenant_tier(&pool, tenant_id).await, "free");
-    let status: String =
-        sqlx::query_scalar!("SELECT status FROM paddle_subscriptions WHERE paddle_subscription_id = 'sub_01h'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let status: String = sqlx::query_scalar!(
+        "SELECT status FROM paddle_subscriptions WHERE paddle_subscription_id = 'sub_01h'"
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(status, "canceled");
 }
 
@@ -251,7 +265,11 @@ async fn invalid_tier_metadata_never_reaches_the_database(pool: PgPool) {
     let email = "meta@test.invalid";
     let tenant_id = seed_tenant(&pool, email).await;
 
-    let (h, b) = signed_event("customer.created", "evt_c3", customer_event("ctm_03h", email));
+    let (h, b) = signed_event(
+        "customer.created",
+        "evt_c3",
+        customer_event("ctm_03h", email),
+    );
     deliver(&pool, &h, &b).await;
 
     // A bogus custom_data.tier must not error the handler (which would make
@@ -268,11 +286,13 @@ async fn invalid_tier_metadata_never_reaches_the_database(pool: PgPool) {
         "free",
         "invalid tier leaves the tenant untouched"
     );
-    let tier: Option<String> = sqlx::query_scalar!(
-        "SELECT tier::text FROM paddle_subscriptions"
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(tier.as_deref(), Some("platinum"), "raw metadata is mirrored verbatim");
+    let tier: Option<String> = sqlx::query_scalar!("SELECT tier::text FROM paddle_subscriptions")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        tier.as_deref(),
+        Some("platinum"),
+        "raw metadata is mirrored verbatim"
+    );
 }

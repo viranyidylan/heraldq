@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 #[derive(Debug, Deserialize)]
-pub struct WebhookEvent {
+pub struct PaddleEvent {
     /// e.g. "subscription.created" — routes the event to a handler.
     #[serde(rename = "event_type")]
     pub event_type: String,
@@ -22,7 +22,7 @@ pub struct WebhookEvent {
     pub data: Value,
 }
 
-impl WebhookEvent {
+impl PaddleEvent {
     pub fn customer(&self) -> Option<CustomerPayload> {
         serde_json::from_value(self.data.clone()).ok()
     }
