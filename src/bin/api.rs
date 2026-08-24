@@ -36,7 +36,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         webhook_limiter,
         signup_limiter,
         policy: ssrf::policy(),
+        paystack_secret_key: config.paystack_secret_key.clone(),
     };
+
+    if state.paystack_secret_key.is_none() {
+        tracing::warn!(
+            "PAYSTACK_SECRET_KEY not set — /webhooks/paystack will refuse deliveries (503)"
+        );
+    }
 
     let app = routes::build(state);
 

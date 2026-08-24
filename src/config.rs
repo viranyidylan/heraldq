@@ -5,6 +5,9 @@ pub struct AppConfig {
     pub database_url: String,
     pub schema: String,
     pub port: u16,
+    // Paystack secret key (sk_...); used to verify webhook signatures.
+    // Optional at parse time so the API still boots without billing.
+    pub paystack_secret_key: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -37,10 +40,15 @@ impl AppConfig {
             .parse::<u16>()
             .map_err(|_| ConfigError::MissingVar("PORT (invalid u16)".into()))?;
 
+        let paystack_secret_key = std::env::var("PAYSTACK_SECRET_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
+
         Ok(AppConfig {
             database_url,
             schema,
             port,
+            paystack_secret_key,
         })
     }
 }

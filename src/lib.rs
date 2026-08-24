@@ -2,6 +2,7 @@ pub mod auth;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod paystack;
 pub mod routes;
 pub mod telemetry;
 pub mod views;
@@ -27,6 +28,10 @@ pub struct AppState {
     // invite-code attempts to limit brute-force / mass-signup abuse.
     pub signup_limiter: Arc<DefaultDirectRateLimiter>,
     pub policy: HttpAcl,
+    // Paystack secret key (sk_...); Paystack signs its webhooks with it.
+    // None = endpoint refuses deliveries (503) until configured, so events
+    // fail loudly instead of silently.
+    pub paystack_secret_key: Option<String>,
 }
 
 #[derive(Clone, Debug)]

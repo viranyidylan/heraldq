@@ -1,6 +1,8 @@
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{self, FromRef, Path, Query, State},
+    http::HeaderMap,
     middleware,
     response::Html,
     routing::{get, post},
@@ -16,13 +18,13 @@ use tower_http::{
     trace::{DefaultOnResponse, TraceLayer},
 };
 
-use tracing::{Level, debug, info};
+use tracing::{Level, debug, error, info, warn};
 
 use crate::{
     AppState, WebhookRequest, auth,
     db::stats::WebhookActivitySummary,
     error::AppError,
-    telemetry,
+    paystack, telemetry,
     webhook::{self, ssrf::validate_destination},
 };
 
@@ -53,6 +55,9 @@ pub fn build(state: AppState) -> Router {
     Router::new()
         .route("/ping", get(ping))
         .route("/health", get(health))
+        // Paystack → us; sits outside /v1 because it authenticates by HMAC
+        // signature, not by tenant API key.
+        .route("/webhooks/paystack", post(paystack_webhook))
         .nest("/v1", v1)
         // ServiceBuilder applies top-down: assign a request id first, then
         // open the trace span (so the id is visible inside it), then copy the
@@ -100,6 +105,101 @@ async fn health() -> Json<HealthCheckResponse> {
         status: 200,
         message: "healthy".into(),
     })
+}
+
+#[derive(Serialize)]
+struct PaystackWebhookAck {
+    received: bool,
+    duplicate: bool,
+}
+
+/// Receive a Paystack webhook delivery.
+///
+/// Paystack retries non-2xx responses (attempts spaced over hours), so no
+/// response here can lose an event that a later attempt could deliver:
+///
+/// - 503 — no secret key configured (deployment issue; loud + retried)
+/// - 400 — structurally unusable request (missing signature/body, no dedup
+///   key, unparseable JSON). Redelivery is byte-identical, so retrying
+///   can't help, but it keeps the failure visible in the dashboard log.
+/// - 401 — HMAC mismatch. A rotated key recovers on the next retry after
+///   redeploy; a forged request is harmlessly retried.
+/// - 500 — transient (DB); the dedup ledger + processing share one
+///   transaction, so a rolled-back attempt is retried cleanly.
+async fn paystack_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<PaystackWebhookAck>, (StatusCode, &'static str)> {
+    let Some(secret_key) = state.paystack_secret_key.as_deref() else {
+        error!("PAYSTACK_SECRET_KEY not set; refusing delivery so Paystack retries");
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "secret key not configured"));
+    };
+
+    let signature = headers
+        .get("x-paystack-signature")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    if signature.is_empty() || body.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "missing signature or body"));
+    }
+
+    // Verified against the exact bytes received — never a re-serialization.
+    match paystack::signature::verify_signature(signature, &body, secret_key) {
+        Ok(()) => {}
+        Err(e @ paystack::signature::SignatureError::Malformed) => {
+            warn!(error = %e, "malformed paystack signature header");
+            return Err((StatusCode::BAD_REQUEST, "malformed signature header"));
+        }
+        Err(e @ paystack::signature::SignatureError::Mismatch) => {
+            warn!(error = %e, "paystack signature verification failed");
+            return Err((StatusCode::UNAUTHORIZED, "invalid signature"));
+        }
+    }
+
+    let event: paystack::events::PaystackEvent = match serde_json::from_slice(&body) {
+        Ok(event) => event,
+        Err(e) => {
+            warn!(error = %e, "paystack webhook body is not a parseable event");
+            return Err((StatusCode::BAD_REQUEST, "unparseable event"));
+        }
+    };
+
+    // Without a dedup key a redelivery is indistinguishable from the first
+    // attempt, and Paystack provides no event ids — refuse rather than guess.
+    let Some(dedup_key) = event.dedup_key() else {
+        warn!(event = %event.event, "payload carries no reference/id/code");
+        return Err((StatusCode::BAD_REQUEST, "no deducible event identity"));
+    };
+
+    let mut tx = state.pg_pool.begin().await.map_err(paystack_db_error)?;
+    let is_new = paystack::sync::record_event(&mut tx, &dedup_key, &event.event)
+        .await
+        .map_err(paystack_db_error)?;
+
+    if is_new {
+        paystack::process_event(&mut tx, &event)
+            .await
+            .map_err(paystack_db_error)?;
+    }
+    tx.commit().await.map_err(paystack_db_error)?;
+
+    info!(
+        event = %event.event,
+        dedup_key = %dedup_key,
+        duplicate = !is_new,
+        "paystack webhook accepted"
+    );
+
+    Ok(Json(PaystackWebhookAck {
+        received: true,
+        duplicate: !is_new,
+    }))
+}
+
+fn paystack_db_error(e: sqlx::Error) -> (StatusCode, &'static str) {
+    error!(error = ?e, "paystack webhook database error");
+    (StatusCode::INTERNAL_SERVER_ERROR, "internal error")
 }
 
 #[derive(Serialize)]

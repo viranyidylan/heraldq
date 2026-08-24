@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO paystack_subscriptions (\n                paystack_subscription_code, paystack_customer_code, status,\n                plan_code, tier, email_token, amount, currency)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n            ON CONFLICT (paystack_subscription_code) DO UPDATE\n            SET status = EXCLUDED.status,\n                plan_code = EXCLUDED.plan_code,\n                tier = EXCLUDED.tier,\n                email_token = EXCLUDED.email_token,\n                amount = EXCLUDED.amount,\n                currency = EXCLUDED.currency,\n                updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "627646ddcdc381015262d53f43e0de75007af10daedda34f1277b92f265f2e3e"
+}

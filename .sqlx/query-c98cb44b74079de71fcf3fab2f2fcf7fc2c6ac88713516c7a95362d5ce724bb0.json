@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tenants t\n            SET tier = $2::text::account_tier\n            FROM paystack_customers c\n            WHERE c.paystack_customer_code = $1\n              AND t.email = c.email",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c98cb44b74079de71fcf3fab2f2fcf7fc2c6ac88713516c7a95362d5ce724bb0"
+}

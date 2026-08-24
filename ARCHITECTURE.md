@@ -345,6 +345,7 @@ Environment-driven (no config files). Required:
 | `LOG_FORMAT` | no | human | `json` for log aggregators |
 | `RUST_LOG` | no | — | tracing filter (e.g. `sliq=debug`) |
 | `SERVICE_NAME` | no | `api` | Dockerfile multi-service selector |
+| `PAYSTACK_SECRET_KEY` | no | — | Paystack secret key (sk_...); unset = `/webhooks/paystack` refuses deliveries (503) |
 
 Loaded via `AppConfig::from_env()` (`config.rs`), which calls `dotenvy::dotenv()`
 first for local `.env` files.
@@ -387,6 +388,7 @@ All under `/v1`, protected by Bearer auth unless noted.
 |---|---|---|---|
 | GET | `/ping` | no | Liveness (`pong`) |
 | GET | `/health` | no | Health JSON |
+| POST | `/webhooks/paystack` | HMAC signature | Paystack billing webhooks → dedup + mirror subscription state |
 | POST | `/v1/signup` | no (rate-limited) | Invite-gated tenant registration → returns API key + HMAC secret |
 | POST | `/v1/webhook` | yes | Enqueue a webhook → `202 { id }` |
 | GET | `/v1/webhook/{id}` | yes | Status (delivered / failed / pending) |
@@ -415,6 +417,11 @@ src/
 │   └── worker.rs       Worker entry point
 ├── auth/
 │   └── mod.rs          API key gen/hash/verify, ValidApiKey extractor
+├── paystack/
+│   ├── mod.rs          event dispatch + delivery-contract docs
+│   ├── signature.rs    x-paystack-signature HMAC-SHA512 verification + tests
+│   ├── events.rs       serde models, synthesized dedup keys
+│   └── sync.rs         customer/subscription mirrors, dedup ledger, tier projection
 ├── webhook/
 │   ├── mod.rs          module root + re-exports
 │   ├── model.rs        WebhookRequest, SendWebhook (job payload) + wire tests
