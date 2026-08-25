@@ -8,9 +8,11 @@
 //! ```
 //!
 //! The signed payload is `"{ts}:{raw_body}"` (the timestamp from the header,
-//! a colon, then the exact bytes Paddle sent), HMAC-SHA256, hex-encoded, and
-//! prefixed with `v1:`. Verification recomputes the MAC over the bytes we
-//! actually received — the body must never be parsed/re-serialized first.
+//! a colon, then the exact bytes Paddle sent), HMAC-SHA256, hex-encoded. The
+//! docs show the digest prefixed with `v1:`, but real deliveries (observed
+//! from the sandbox) send the bare hex — both are accepted. Verification
+//! recomputes the MAC over the bytes we actually received — the body must
+//! never be parsed/re-serialized first.
 
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
@@ -60,9 +62,9 @@ pub fn verify_signature(
     mac.update(b":");
     mac.update(raw_body);
 
-    let provided = h1
-        .strip_prefix("v1:")
-        .ok_or(SignatureError::MalformedHeader)?;
+    // Digests are documented as `v1:`-prefixed but observed unprefixed in
+    // real deliveries; accept either.
+    let provided = h1.strip_prefix("v1:").unwrap_or(&h1);
     let provided = hex::decode(provided).map_err(|_| SignatureError::MalformedHeader)?;
     // Constant-time comparison — verify_slice short-circuits nothing.
     mac.verify_slice(&provided)
@@ -180,12 +182,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_v1_prefix_is_malformed() {
+    fn unprefixed_digest_passes() {
         let header = sign(1_700_000_000, BODY, SECRET);
         let no_prefix = header.replace("h1=v1:", "h1=");
         assert_eq!(
             verify_signature(&no_prefix, BODY.as_bytes(), SECRET, now()),
-            Err(SignatureError::MalformedHeader)
+            Ok(())
         );
     }
 
