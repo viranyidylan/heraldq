@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT tenant_id FROM paddle_customers WHERE paddle_customer_id = 'ctm_01h'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "fd3b7fa4cefb3b0f012e96ef24cd92039b675ccfab5e70799d71c334b358202a"
+}

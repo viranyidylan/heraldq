@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO tenants (name, tier, email, hmac_secret)\n        VALUES ('paddle-test', 'free', $1, 'not-a-real-secret')\n        RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0da8b42a8036f5d309b2b719ea207838adb6edcb3f004fbc419b0082db320029"
+}
