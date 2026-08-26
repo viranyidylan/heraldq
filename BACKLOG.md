@@ -20,7 +20,7 @@ L (week+).
 | 2 | ~~P0~~ done | ~~Set `PADDLE_API_KEY` (sandbox) on the api service~~ | H | S | Set 2026-08-26; repeat-buyer hydration verified end-to-end on prod. Swap key + `PADDLE_API_URL=https://api.paddle.com` at go-live. |
 | 3 | P0 | Paddle live cutover | H | S–M | Production client token + price IDs in `signup.html`; prod notification destination; domain approval for heraldq.com checkout; production API key + URL; verify with one real transaction. |
 | 4 | P0 | Tier-based quota enforcement | H | M | Pricing promises 5k / 50k / 500k webhooks per month by tier; code enforces one global 50k constant (`MONTHLY_WEBHOOK_LIMIT`). This is the entire point of the billing mirror. |
-| 5 | P0 | Prod hygiene: deactivate dead sandbox destination | M | S | Test rows cleaned 2026-08-26. Old destination `ntfset_01m0wvcr...` still failing every event — deactivate in the sandbox dashboard (Developer tools → Notifications); API refuses MCP deactivation. |
+| 5 | ~~P0~~ done | ~~Prod hygiene: deactivate dead sandbox destination~~ | M | S | Deactivated 2026-08-26 via API update (`active: false`), not dashboard — the earlier "API refuses" note was a failed `delete` attempt. Live destination `ntfset_01m0ztym...` untouched and still active. |
 | 6 | P1 | Per-tier rate limits + retention wiring | H | M | Pricing promises 240 / 1.2k / 3k per minute by tier; code has uniform 10 req/s (600/min). Retention columns exist per tenant (migration 0009) — map tier → default retention days at signup/upgrade. |
 | 7 | P1 | API key lifecycle: rotate / revoke / lost-key recovery | H | M | No login exists; a lost key is a manual email today. Even minimal "reissue key from verified email" closes the biggest support hole. |
 | 8 | P1 | Billing observability | M | S | Alerts cover DLQ/queue/API but nothing Paddle: alert on webhook 500 bursts (Paddle retries exhausting), stub customers unhydrated > 24h, `active` Paddle subs whose tenant is still `free` (drift detector). |
@@ -79,6 +79,10 @@ Not a commitment; the shape of the work if we pull it:
 
 ## Done
 
+- 2026-08-26: Dead sandbox notification destination `ntfset_01m0wvcr...`
+  ("local app ngrokked", stale ngrok URL failing every event) deactivated via
+  API update; only the live `api.heraldq.com` destination remains active —
+  PR #28.
 - 2026-08-26: PR #26 merged (`a4bea0e`); api + worker redeployed from main;
   all three billing convergence paths verified on prod (customer event,
   repeat-buyer hydration, signup-time backfill).
