@@ -131,7 +131,7 @@ offline compile-time validation (`SQLX_OFFLINE=true`).
 |---|---|---|
 | `tenants` | Account root | `id` (UUID), `tier` (enum), `email` (unique), `hmac_secret`, retention days |
 | `api_keys` | Hashed credentials | `key_hash` (SHA-256, unique), `expires_at`, `is_active` |
-| `beta_codes` | Invite-gated signup | `code` (PK), `redeemed_at`, `redeemed_by_tenant_id`, CHECK constraint |
+| `beta_codes` | Optional invite codes (signup is open) | `code` (PK), `redeemed_at`, `redeemed_by_tenant_id`, CHECK constraint |
 | `tenant_monthly_quotas` | Usage cap | `(tenant_id, month_start)` PK, `webhook_count` |
 | `webhook_deliveries` | Success log | `id` (ULID), `payload` (JSONB), `delivered_at`, `attempts` |
 | `dead_letter_queue` | Failure log + replay | `id`, `failure_reason`, `replayed_at`, `replayed_as` |
@@ -207,7 +207,7 @@ following. Tests pin the classic evasion vectors (decimal/hex/octal IPs).
 | Per-tenant enqueue rate | `governor` keyed token bucket | 10 req/s per tenant |
 | Global signup rate | `governor` direct limiter | 100/min across all clients |
 | Monthly volume | Atomic DB upsert (`increment_monthly_quota`) | 50,000 webhooks/month |
-| API key validity | `expires_at` column + check | 14-day trial |
+| API key validity | `expires_at` column + check | No expiry; tier/quota is the boundary |
 
 The monthly quota is race-free: a single `INSERT ... ON CONFLICT DO UPDATE
 WHERE count < limit RETURNING` either increments and returns a row, or
@@ -389,7 +389,7 @@ All under `/v1`, protected by Bearer auth unless noted.
 | GET | `/ping` | no | Liveness (`pong`) |
 | GET | `/health` | no | Health JSON |
 | POST | `/webhooks/paddle` | HMAC signature | Paddle billing webhooks → dedup + mirror subscription state |
-| POST | `/v1/signup` | no (rate-limited) | Invite-gated tenant registration → returns API key + HMAC secret |
+| POST | `/v1/signup` | no (rate-limited) | Open tenant registration → returns API key + HMAC secret; links any existing Paddle customer and applies its tier |
 | POST | `/v1/webhook` | yes | Enqueue a webhook → `202 { id }` |
 | GET | `/v1/webhook/{id}` | yes | Status (delivered / failed / pending) |
 | GET | `/v1/deliveries` | yes | Paginated success history |

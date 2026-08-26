@@ -7,7 +7,7 @@ use axum::{
     response::Html,
     routing::{get, post},
 };
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use rand::RngExt;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -90,8 +90,6 @@ pub fn build(state: AppState) -> Router {
         )
         .with_state(state)
 }
-
-const TRIAL_DURATION_DAYS: i64 = 14;
 
 /// Per-tenant cap on webhooks enqueued per calendar month.
 const MONTHLY_WEBHOOK_LIMIT: i64 = 50_000;
@@ -243,9 +241,17 @@ async fn enqueue_webhook(
     ))
 }
 
+/// Signup creates a free-tier tenant and returns credentials once.
+///
+/// Signup is the front door: it is open (no invite code required), keys do
+/// not expire, and any Paddle customer already mirroring this email is
+/// linked and its tier applied immediately — so billing state is consistent
+/// the moment the account exists, not at Paddle's next webhook.
 #[derive(Deserialize)]
 struct SignupRequest {
-    invite_code: String,
+    /// Optional invite code. Absent codes are fine; a present-but-invalid
+    /// code is rejected so a typo'd code never silently loses its perk.
+    invite_code: Option<String>,
     name: String,
     email: String,
 }
@@ -255,7 +261,6 @@ struct SignupResponse {
     tenant_id: uuid::Uuid,
     api_key: String,
     hmac_secret: String,
-    expires_at: chrono::DateTime<Utc>,
 }
 
 async fn signup(
@@ -267,26 +272,29 @@ async fn signup(
     };
 
     let hmac_secret = auth::generate_hmac_secret();
-    let email_parsed = body.email;
 
     let mut tx = state.pg_pool.begin().await?;
 
     let tenant_id =
-        crate::db::tenants::create_tenant(&mut tx, &body.name, &email_parsed, &hmac_secret).await?;
+        crate::db::tenants::create_tenant(&mut tx, &body.name, &body.email, &hmac_secret).await?;
 
-    // redeem invite code for this tenant
-    crate::db::tenants::redeem_invite_code(&mut tx, &body.invite_code, tenant_id).await?;
+    if let Some(invite_code) = body.invite_code.as_deref() {
+        crate::db::tenants::redeem_invite_code(&mut tx, invite_code, tenant_id).await?;
+    }
 
-    // if that worked, create and serve their api key
+    // Keys don't expire: the product boundary is tier/quota enforcement,
+    // not a time-based trial. A key that lapses mid-subscription would lock
+    // a paying customer out.
     let raw_key = auth::generate_api_key();
     let key_hash = auth::hash_api_key(&raw_key);
-    let expires_at = Utc::now() + Duration::days(TRIAL_DURATION_DAYS);
 
-    crate::db::tenants::create_api_key(&mut tx, tenant_id, &key_hash, "trial", expires_at).await?;
+    crate::db::tenants::create_api_key(&mut tx, tenant_id, &key_hash, "signup", None).await?;
+
+    paddle::sync::link_tenant_and_apply_tier(&mut tx, tenant_id, &body.email).await?;
 
     tx.commit().await?;
 
-    info!(tenant_id = %tenant_id, "New trial tenant signed up");
+    info!(tenant_id = %tenant_id, "New tenant signed up");
 
     Ok((
         StatusCode::CREATED,
@@ -294,7 +302,6 @@ async fn signup(
             tenant_id,
             api_key: raw_key,
             hmac_secret,
-            expires_at,
         }),
     ))
 }

@@ -46,10 +46,12 @@ pub async fn record_event(
     Ok(inserted.is_some())
 }
 
-/// Mirror a Paddle customer. The tenant link is resolved by email here —
-/// not at signup — because the Paddle customer may be created before any
-/// heraldQ tenant exists (or belong to a prospective customer who never
-/// signs up).
+/// Mirror a Paddle customer.
+///
+/// The tenant link is resolved by email when it can be, but a previously
+/// established link is never dropped: `COALESCE` keeps the stored
+/// `tenant_id` when the new email matches no tenant (e.g. the customer
+/// changed their email in Paddle before we saw `customer.updated`).
 pub async fn upsert_customer(
     conn: &mut sqlx::PgConnection,
     customer: &CustomerPayload,
@@ -60,7 +62,9 @@ pub async fn upsert_customer(
                     (SELECT id FROM tenants WHERE email = $2))
             ON CONFLICT (paddle_customer_id) DO UPDATE
             SET email = EXCLUDED.email,
-                tenant_id = (SELECT id FROM tenants WHERE email = EXCLUDED.email),
+                tenant_id = COALESCE(
+                    (SELECT id FROM tenants WHERE email = EXCLUDED.email),
+                    paddle_customers.tenant_id),
                 updated_at = now()"#,
         customer.id,
         customer.email,
@@ -163,12 +167,70 @@ async fn apply_tier_to_tenant(
             SET tier = $2::text::account_tier
             FROM paddle_customers c
             WHERE c.paddle_customer_id = $1
-              AND c.email <> ''
-              AND t.email = c.email"#,
+              AND (t.id = c.tenant_id
+                   OR (c.tenant_id IS NULL
+                       AND c.email <> ''
+                       AND t.email = c.email))"#,
         paddle_customer_id,
         tier,
     )
     .execute(conn)
     .await?;
+    Ok(())
+}
+
+/// Claim the Paddle customer(s) matching a just-signed-up tenant's email,
+/// then apply whatever tier their mirrored subscription implies.
+///
+/// Called from `signup` inside its transaction: signup is the front door,
+/// so this is the moment a deterministic `tenant_id` link replaces email
+/// matching. It closes the gap where a customer who paid before creating
+/// their account (legacy checkouts, support-created subscriptions, or
+/// webhooks that arrived pre-signup) would otherwise stay on `free` until
+/// Paddle's next billing event — up to a month later.
+pub async fn link_tenant_and_apply_tier(
+    conn: &mut sqlx::PgConnection,
+    tenant_id: uuid::Uuid,
+    email: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"UPDATE paddle_customers
+            SET tenant_id = $1,
+                updated_at = now()
+            WHERE email = $2"#,
+        tenant_id,
+        email,
+    )
+    .execute(&mut *conn)
+    .await?;
+
+    // Latest mirrored subscription for this tenant, if any. Out-of-order or
+    // redelivered events converge, so `updated_at DESC` is the newest state
+    // Paddle has told us about.
+    let sub = sqlx::query!(
+        r#"SELECT s.status, s.tier
+            FROM paddle_subscriptions s
+            JOIN paddle_customers c
+              ON c.paddle_customer_id = s.paddle_customer_id
+            WHERE c.tenant_id = $1
+            ORDER BY s.updated_at DESC
+            LIMIT 1"#,
+        tenant_id,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    if let Some(row) = sub
+        && let Some(tier) = effective_tier(&row.status, row.tier)
+    {
+        sqlx::query!(
+            r#"UPDATE tenants SET tier = $2::text::account_tier WHERE id = $1"#,
+            tenant_id,
+            tier,
+        )
+        .execute(&mut *conn)
+        .await?;
+    }
+
     Ok(())
 }

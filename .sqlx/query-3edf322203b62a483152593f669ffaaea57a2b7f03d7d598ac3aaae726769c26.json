@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO paddle_customers (paddle_customer_id, email, tenant_id)\n            VALUES ($1, $2,\n                    (SELECT id FROM tenants WHERE email = $2))\n            ON CONFLICT (paddle_customer_id) DO UPDATE\n            SET email = EXCLUDED.email,\n                tenant_id = COALESCE(\n                    (SELECT id FROM tenants WHERE email = EXCLUDED.email),\n                    paddle_customers.tenant_id),\n                updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3edf322203b62a483152593f669ffaaea57a2b7f03d7d598ac3aaae726769c26"
+}

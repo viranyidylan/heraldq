@@ -296,3 +296,93 @@ async fn invalid_tier_metadata_never_reaches_the_database(pool: PgPool) {
         "raw metadata is mirrored verbatim"
     );
 }
+
+/// The signup half of the linkage: a customer who paid *before* creating
+/// their account must be upgraded at signup, not at Paddle's next event.
+#[sqlx::test]
+#[ignore = "needs live Postgres; CI runs SQLX_OFFLINE with no database"]
+async fn signup_links_customer_and_applies_tier_immediately(pool: PgPool) {
+    let email = "late-signup@test.invalid";
+
+    // Billing events arrive while no tenant exists — the tier update is a
+    // no-op and the customer row stays unlinked.
+    let (h, b) = signed_event(
+        "customer.created",
+        "evt_c4",
+        customer_event("ctm_04h", email),
+    );
+    assert!(deliver(&pool, &h, &b).await);
+    let (h, b) = signed_event(
+        "subscription.created",
+        "evt_s5",
+        subscription_event("ctm_04h", "active", Some("professional")),
+    );
+    assert!(deliver(&pool, &h, &b).await);
+
+    // Signup: create the tenant, then link + apply, all in one tx — the
+    // same sequence the /v1/signup handler runs.
+    let mut tx = pool.begin().await.unwrap();
+    let tenant_id = sliq::db::tenants::create_tenant(&mut tx, "late", email, "not-a-real-secret")
+        .await
+        .unwrap();
+    sliq::paddle::sync::link_tenant_and_apply_tier(&mut tx, tenant_id, email)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    assert_eq!(tenant_tier(&pool, tenant_id).await, "professional");
+    let linked: Option<Uuid> = sqlx::query_scalar!(
+        "SELECT tenant_id FROM paddle_customers WHERE paddle_customer_id = 'ctm_04h'"
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(linked, Some(tenant_id));
+}
+
+/// Once a customer is linked, the link is the identity — email changes in
+/// Paddle must neither drop the link nor stop tier updates from applying.
+#[sqlx::test]
+#[ignore = "needs live Postgres; CI runs SQLX_OFFLINE with no database"]
+async fn tenant_link_survives_customer_email_change(pool: PgPool) {
+    let email = "rename@test.invalid";
+    let tenant_id = seed_tenant(&pool, email).await;
+
+    let (h, b) = signed_event(
+        "customer.created",
+        "evt_c5",
+        customer_event("ctm_05h", email),
+    );
+    assert!(deliver(&pool, &h, &b).await);
+
+    // Customer changes email in Paddle; the new address matches no tenant.
+    let (h, b) = signed_event(
+        "customer.updated",
+        "evt_c6",
+        customer_event("ctm_05h", "renamed@test.invalid"),
+    );
+    assert!(deliver(&pool, &h, &b).await);
+
+    let linked: Option<Uuid> = sqlx::query_scalar!(
+        "SELECT tenant_id FROM paddle_customers WHERE paddle_customer_id = 'ctm_05h'"
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        linked,
+        Some(tenant_id),
+        "an email that matches no tenant must not clobber the link"
+    );
+
+    // A subscription event for the renamed customer still upgrades the
+    // linked tenant — the join prefers tenant_id over email.
+    let (h, b) = signed_event(
+        "subscription.created",
+        "evt_s6",
+        subscription_event("ctm_05h", "active", Some("basic")),
+    );
+    assert!(deliver(&pool, &h, &b).await);
+
+    assert_eq!(tenant_tier(&pool, tenant_id).await, "basic");
+}

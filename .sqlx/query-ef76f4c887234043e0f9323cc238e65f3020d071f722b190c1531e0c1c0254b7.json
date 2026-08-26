@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE paddle_customers\n            SET tenant_id = $1,\n                updated_at = now()\n            WHERE email = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ef76f4c887234043e0f9323cc238e65f3020d071f722b190c1531e0c1c0254b7"
+}
