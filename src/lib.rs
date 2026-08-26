@@ -32,6 +32,10 @@ pub struct AppState {
     // Paddle-Signature headers. None = endpoint refuses deliveries (503)
     // until configured, so events fail loudly instead of silently.
     pub paddle_webhook_secret: Option<String>,
+    // Browser origins allowed to POST /v1/signup from the marketing site.
+    // Scoped to that one route — every other endpoint is API-key or
+    // HMAC-authenticated and has no browser callers.
+    pub cors_allowed_origins: Vec<String>,
 }
 
 #[derive(Clone, Debug)]

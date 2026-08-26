@@ -41,10 +41,17 @@ struct HealthCheckResponse {
 }
 
 pub fn build(state: AppState) -> Router {
+    // CORS is scoped to the one route with a browser caller: the marketing
+    // site's signup form. Every other endpoint authenticates by API key or
+    // HMAC and has no browser callers, so it gets no CORS at all (browsers
+    // block the response, which is exactly right).
+    let cors = cors_for_signup(&state.cors_allowed_origins);
+
     let v1 = Router::new()
+        .route("/signup", post(signup))
+        .route_layer(cors)
         .route("/webhook", post(enqueue_webhook))
         .route("/webhook/{id}", get(webhook_status))
-        .route("/signup", post(signup))
         .route("/mock", post(mock))
         .route("/dlq", get(dlq))
         .route("/dlq/{id}/replay", post(dlq_replay))
@@ -89,6 +96,20 @@ pub fn build(state: AppState) -> Router {
                 .layer(PropagateRequestIdLayer::x_request_id()),
         )
         .with_state(state)
+}
+
+fn cors_for_signup(origins: &[String]) -> tower_http::cors::CorsLayer {
+    use tower_http::cors::{AllowOrigin, CorsLayer};
+
+    let allowed: Vec<_> = origins
+        .iter()
+        .filter_map(|o| o.parse().ok())
+        .collect::<Vec<http::HeaderValue>>();
+
+    CorsLayer::new()
+        .allow_methods([axum::http::Method::POST])
+        .allow_headers([axum::http::header::CONTENT_TYPE])
+        .allow_origin(AllowOrigin::list(allowed))
 }
 
 /// Per-tenant cap on webhooks enqueued per calendar month.
@@ -263,6 +284,23 @@ struct SignupResponse {
     hmac_secret: String,
 }
 
+/// Deliberately loose: exactly one `@`, non-empty local part, a dot in the
+/// domain, no whitespace, sane lengths. Signup's job is to keep junk out of
+/// the Paddle email-linkage — not to prove the inbox exists.
+fn is_valid_email(email: &str) -> bool {
+    let Some((local, domain)) = email.split_once('@') else {
+        return false;
+    };
+    !local.is_empty()
+        && local.len() <= 64
+        && domain.len() <= 251
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && !domain.contains('@')
+        && !email.chars().any(char::is_whitespace)
+}
+
 async fn signup(
     State(state): State<AppState>,
     extract::Json(body): extract::Json<SignupRequest>,
@@ -271,14 +309,33 @@ async fn signup(
         return Err(AppError::TooManyRequests);
     };
 
+    // Normalize before anything touches the database: emails are stored
+    // lowercased on both sides of the Paddle linkage (signup and the
+    // customer mirror), so "You@Example.com" at signup still links to the
+    // "you@example.com" Paddle collected at checkout. Mobile keyboards
+    // autocapitalize; the linkage must not care.
+    let email = body.email.trim().to_lowercase();
+    let name = body.name.trim().to_owned();
+    let invite_code = body
+        .invite_code
+        .as_deref()
+        .map(str::trim)
+        .filter(|code| !code.is_empty());
+
+    if name.is_empty() {
+        return Err(AppError::NameRequired);
+    }
+    if !is_valid_email(&email) {
+        return Err(AppError::InvalidEmail);
+    }
+
     let hmac_secret = auth::generate_hmac_secret();
 
     let mut tx = state.pg_pool.begin().await?;
 
-    let tenant_id =
-        crate::db::tenants::create_tenant(&mut tx, &body.name, &body.email, &hmac_secret).await?;
+    let tenant_id = crate::db::tenants::create_tenant(&mut tx, &name, &email, &hmac_secret).await?;
 
-    if let Some(invite_code) = body.invite_code.as_deref() {
+    if let Some(invite_code) = invite_code {
         crate::db::tenants::redeem_invite_code(&mut tx, invite_code, tenant_id).await?;
     }
 
@@ -615,5 +672,35 @@ mod tests {
         assert_eq!(json["status"], "pending");
         assert_eq!(json["attempts"], 3);
         assert_eq!(json["last_error"], "500 Internal Server Error");
+    }
+
+    #[test]
+    fn email_validator_accepts_real_shapes() {
+        for good in [
+            "you@example.com",
+            "first.last+tag@sub.example.co",
+            "a@b.io",
+            "USER@EXAMPLE.COM",
+        ] {
+            assert!(is_valid_email(good), "should accept {good}");
+        }
+    }
+
+    #[test]
+    fn email_validator_rejects_junk() {
+        for bad in [
+            "",
+            "no-at-sign",
+            "@example.com",
+            "user@",
+            "user@example",
+            "user @example.com",
+            "user@exa mple.com",
+            "a@b@c.com",
+            "user@.example.com",
+            "user@example.com.",
+        ] {
+            assert!(!is_valid_email(bad), "should reject {bad:?}");
+        }
     }
 }

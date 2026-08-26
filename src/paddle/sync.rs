@@ -56,6 +56,10 @@ pub async fn upsert_customer(
     conn: &mut sqlx::PgConnection,
     customer: &CustomerPayload,
 ) -> Result<(), sqlx::Error> {
+    // Stored lowercased: the email is the linkage key to tenants, and signup
+    // lowercases its side too, so case differences (Paddle's collector vs a
+    // phone keyboard) can never break the match.
+    let email = customer.email.to_lowercase();
     sqlx::query!(
         r#"INSERT INTO paddle_customers (paddle_customer_id, email, tenant_id)
             VALUES ($1, $2,
@@ -67,7 +71,7 @@ pub async fn upsert_customer(
                     paddle_customers.tenant_id),
                 updated_at = now()"#,
         customer.id,
-        customer.email,
+        email,
     )
     .execute(conn)
     .await?;

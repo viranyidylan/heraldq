@@ -37,6 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         signup_limiter,
         policy: ssrf::policy(),
         paddle_webhook_secret: config.paddle_webhook_secret.clone(),
+        cors_allowed_origins: config.cors_allowed_origins.clone(),
     };
 
     if state.paddle_webhook_secret.is_none() {

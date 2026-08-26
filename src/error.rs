@@ -32,6 +32,10 @@ pub enum AppError {
     InviteCodeAlreadyRedeemed,
     #[error("email already registered")]
     EmailAlreadyRegistered,
+    #[error("name is required")]
+    NameRequired,
+    #[error("invalid email")]
+    InvalidEmail,
 
     // --- destination / url hygiene ---
     #[error("invalid destination")]
@@ -71,6 +75,8 @@ impl IntoResponse for AppError {
                 StatusCode::CONFLICT,
                 "A tenant with this email address is already registered",
             ),
+            Self::NameRequired => (StatusCode::BAD_REQUEST, "name is required"),
+            Self::InvalidEmail => (StatusCode::BAD_REQUEST, "please use a valid email address"),
             Self::InvalidDestination(ref e) => {
                 error!(error = ?e, "invalid destination");
                 (StatusCode::BAD_REQUEST, "invalid destination")
@@ -130,5 +136,12 @@ mod tests {
     async fn invite_code_already_redeemed_is_409() {
         let response = AppError::InviteCodeAlreadyRedeemed.into_response();
         assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn signup_validation_errors_are_400() {
+        for error in [AppError::NameRequired, AppError::InvalidEmail] {
+            assert_eq!(error.into_response().status(), StatusCode::BAD_REQUEST);
+        }
     }
 }

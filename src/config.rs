@@ -8,6 +8,9 @@ pub struct AppConfig {
     // Secret for verifying Paddle webhook signatures. Optional at parse time
     // so the API still boots without billing configured.
     pub paddle_webhook_secret: Option<String>,
+    // Browser origins allowed to call /v1/signup (the marketing site's
+    // signup form). Comma-separated; defaults to the production site.
+    pub cors_allowed_origins: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -44,11 +47,20 @@ impl AppConfig {
             .ok()
             .filter(|s| !s.is_empty());
 
+        let cors_allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS")
+            .unwrap_or_else(|_| "https://heraldq.com,https://www.heraldq.com".into())
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+
         Ok(AppConfig {
             database_url,
             schema,
             port,
             paddle_webhook_secret,
+            cors_allowed_origins,
         })
     }
 }
