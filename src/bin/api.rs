@@ -37,8 +37,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         signup_limiter,
         policy: ssrf::policy(),
         paddle_webhook_secret: config.paddle_webhook_secret.clone(),
+        paddle_api: config.paddle_api_key.as_ref().map(|key| {
+            sliq::paddle::api::PaddleApi::new(key.clone(), config.paddle_api_url.clone())
+        }),
         cors_allowed_origins: config.cors_allowed_origins.clone(),
     };
+
+    if state.paddle_api.is_none() {
+        tracing::warn!(
+            "PADDLE_API_KEY not set — stub Paddle customers won't hydrate until a customer event arrives"
+        );
+    }
 
     if state.paddle_webhook_secret.is_none() {
         tracing::warn!(

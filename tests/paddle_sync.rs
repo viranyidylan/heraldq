@@ -69,6 +69,15 @@ fn subscription_event(customer_id: &str, status: &str, tier: Option<&str>) -> se
 /// The same work the route handler does: verify, then ledger + sync in one tx.
 /// Returns whether the event was new (vs. deduped).
 async fn deliver(pool: &PgPool, header: &str, body: &[u8]) -> bool {
+    deliver_with(pool, header, body, None).await
+}
+
+async fn deliver_with(
+    pool: &PgPool,
+    header: &str,
+    body: &[u8],
+    api: Option<&sliq::paddle::api::PaddleApi>,
+) -> bool {
     verify_signature(header, body, SECRET, Utc::now()).expect("test events are correctly signed");
 
     let event: PaddleEvent = serde_json::from_slice(body).expect("test events parse");
@@ -83,7 +92,9 @@ async fn deliver(pool: &PgPool, header: &str, body: &[u8]) -> bool {
     .await
     .unwrap();
     if is_new {
-        sliq::paddle::process_event(&mut tx, &event).await.unwrap();
+        sliq::paddle::process_event(&mut tx, &event, api)
+            .await
+            .unwrap();
     }
     tx.commit().await.unwrap();
     is_new
@@ -385,4 +396,69 @@ async fn tenant_link_survives_customer_email_change(pool: PgPool) {
     assert!(deliver(&pool, &h, &b).await);
 
     assert_eq!(tenant_tier(&pool, tenant_id).await, "basic");
+}
+
+/// Repeat buyers never re-fire `customer.created` (Paddle reuses the
+/// customer matched by email at checkout), so a subscription can arrive for
+/// an email-less stub. The Paddle API fills the gap: hydration links the
+/// tenant and the tier upgrade lands in the same webhook.
+#[sqlx::test]
+#[ignore = "needs live Postgres; CI runs SQLX_OFFLINE with no database"]
+async fn stub_customer_hydrates_from_paddle_api_on_subscription(pool: PgPool) {
+    use wiremock::matchers::{method, path};
+    use wiremock::{MockServer, ResponseTemplate};
+
+    let email = "repeat-buyer@test.invalid";
+    let tenant_id = seed_tenant(&pool, email).await;
+
+    let server = MockServer::start().await;
+    wiremock::Mock::given(method("GET"))
+        .and(path("/customers/ctm_07h"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": { "id": "ctm_07h", "email": email }
+        })))
+        .mount(&server)
+        .await;
+
+    let api = sliq::paddle::api::PaddleApi::new("test-key".into(), server.uri());
+
+    // No customer.created — the subscription is the first event this
+    // customer ever generates toward us.
+    let (h, b) = signed_event(
+        "subscription.created",
+        "evt_s7",
+        subscription_event("ctm_07h", "active", Some("basic")),
+    );
+    assert!(deliver_with(&pool, &h, &b, Some(&api)).await);
+
+    assert_eq!(tenant_tier(&pool, tenant_id).await, "basic");
+    let row = sqlx::query!(
+        "SELECT email, tenant_id FROM paddle_customers WHERE paddle_customer_id = 'ctm_07h'"
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.email, email);
+    assert_eq!(row.tenant_id, Some(tenant_id));
+}
+
+/// Without an API key configured, the same flow degrades gracefully: the
+/// stub stays (no crash, no 500), and linkage waits for a customer event.
+#[sqlx::test]
+#[ignore = "needs live Postgres; CI runs SQLX_OFFLINE with no database"]
+async fn stub_customer_without_api_key_degrades_gracefully(pool: PgPool) {
+    let (h, b) = signed_event(
+        "subscription.created",
+        "evt_s8",
+        subscription_event("ctm_08h", "active", Some("basic")),
+    );
+    assert!(deliver(&pool, &h, &b).await);
+
+    let email: String = sqlx::query_scalar!(
+        "SELECT email FROM paddle_customers WHERE paddle_customer_id = 'ctm_08h'"
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(email, "", "stub remains, awaiting a customer event");
 }

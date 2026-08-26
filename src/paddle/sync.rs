@@ -7,7 +7,9 @@
 //! latest state regardless of arrival order or duplication.
 
 use chrono::{DateTime, Utc};
+use tracing::{error, warn};
 
+use crate::paddle::api::PaddleApi;
 use crate::paddle::events::{CustomerPayload, SubscriptionPayload};
 
 /// Values allowed in `tenants.tier` (the Postgres `account_tier` enum).
@@ -82,10 +84,15 @@ pub async fn upsert_customer(
 /// linked tenant (if any).
 ///
 /// A stub customer row is inserted first when the `customer.created` event
-/// hasn't landed yet — out-of-order delivery is normal under retries.
+/// hasn't landed yet — out-of-order delivery is normal under retries. If the
+/// stub is still email-less (that event may *never* arrive: Paddle reuses
+/// existing customers by email at checkout, so repeat buyers never generate
+/// a new `customer.created`), the customer is fetched from the Paddle API so
+/// the email link — and with it the tier upgrade — converges now.
 pub async fn upsert_subscription(
     conn: &mut sqlx::PgConnection,
     sub: &SubscriptionPayload,
+    api: Option<&PaddleApi>,
 ) -> Result<(), sqlx::Error> {
     let price = sub.primary_price();
 
@@ -97,6 +104,8 @@ pub async fn upsert_subscription(
     )
     .execute(&mut *conn)
     .await?;
+
+    hydrate_stub_customer(&mut *conn, api, &sub.customer_id).await?;
 
     sqlx::query!(
         r#"INSERT INTO paddle_subscriptions (
@@ -138,6 +147,51 @@ pub async fn upsert_subscription(
     }
 
     Ok(())
+}
+
+/// Fill in an email-less stub customer from the Paddle API.
+///
+/// No-op when the customer is already hydrated or no API client is
+/// configured. Transient Paddle API failures propagate (→ 500 → Paddle
+/// retries the webhook); permanent ones (bad key, unknown customer) are
+/// logged and skipped — the stub converges on any later customer event.
+async fn hydrate_stub_customer(
+    conn: &mut sqlx::PgConnection,
+    api: Option<&PaddleApi>,
+    customer_id: &str,
+) -> Result<(), sqlx::Error> {
+    let row = sqlx::query!(
+        r#"SELECT email FROM paddle_customers WHERE paddle_customer_id = $1"#,
+        customer_id,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    if !row.is_some_and(|r| r.email.is_empty()) {
+        return Ok(());
+    }
+
+    let Some(api) = api else {
+        warn!(
+            paddle_customer_id = customer_id,
+            "stub customer and no PADDLE_API_KEY — email link deferred to a customer event"
+        );
+        return Ok(());
+    };
+
+    match api.get_customer(customer_id).await {
+        Ok(customer) => upsert_customer(&mut *conn, &customer).await,
+        Err(crate::paddle::api::ApiError::Transient(detail)) => {
+            error!(paddle_customer_id = customer_id, %detail,
+                "transient Paddle API failure — failing the webhook so Paddle retries");
+            Err(sqlx::Error::Io(std::io::Error::other(detail)))
+        }
+        Err(crate::paddle::api::ApiError::Permanent(detail)) => {
+            error!(paddle_customer_id = customer_id, %detail,
+                "cannot hydrate stub customer — skipping");
+            Ok(())
+        }
+    }
 }
 
 /// The tier a tenant should hold given a subscription's Paddle status.

@@ -19,6 +19,7 @@
 //! dashboard's notification log honest — while transient problems (DB down)
 //! return 500 and recover automatically.
 
+pub mod api;
 pub mod events;
 pub mod signature;
 pub mod sync;
@@ -26,6 +27,7 @@ pub mod sync;
 use sqlx::PgConnection;
 use tracing::{error, info, warn};
 
+use crate::paddle::api::PaddleApi;
 use crate::paddle::events::PaddleEvent;
 
 /// Dispatch a deduped event to its handler.
@@ -34,9 +36,13 @@ use crate::paddle::events::PaddleEvent;
 /// redelivery could never fix are handled inline. Unknown event types ack
 /// silently — a destination can subscribe to more events than the code
 /// handles.
+///
+/// `api` is used to converge stub customers (see `api` module); `None`
+/// disables that fetch and the mirror still converges on customer events.
 pub async fn process_event(
     conn: &mut PgConnection,
     event: &PaddleEvent,
+    api: Option<&PaddleApi>,
 ) -> Result<(), sqlx::Error> {
     match event.event_type.as_str() {
         "customer.created" | "customer.updated" => match event.customer() {
@@ -50,7 +56,7 @@ pub async fn process_event(
         },
         "subscription.created" | "subscription.updated" | "subscription.canceled" => {
             match event.subscription() {
-                Some(sub) => sync::upsert_subscription(conn, &sub).await,
+                Some(sub) => sync::upsert_subscription(conn, &sub, api).await,
                 None => {
                     error!(event_type = %event.event_type, "unparseable subscription payload");
                     Ok(())

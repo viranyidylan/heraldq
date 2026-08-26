@@ -200,7 +200,7 @@ async fn paddle_webhook(
     .map_err(paddle_db_error)?;
 
     if is_new {
-        paddle::process_event(&mut tx, &event)
+        paddle::process_event(&mut tx, &event, state.paddle_api.as_ref())
             .await
             .map_err(paddle_db_error)?;
     }
