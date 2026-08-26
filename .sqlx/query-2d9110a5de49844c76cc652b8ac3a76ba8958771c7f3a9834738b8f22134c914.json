@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO paddle_subscriptions (\n                paddle_subscription_id, paddle_customer_id, status, tier,\n                price_id, product_id, scheduled_change,\n                current_period_start, current_period_end,\n                canceled_at, next_billed_at)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n            ON CONFLICT (paddle_subscription_id) DO UPDATE\n            SET status = EXCLUDED.status,\n                tier = EXCLUDED.tier,\n                price_id = EXCLUDED.price_id,\n                product_id = EXCLUDED.product_id,\n                scheduled_change = EXCLUDED.scheduled_change,\n                current_period_start = EXCLUDED.current_period_start,\n                current_period_end = EXCLUDED.current_period_end,\n                canceled_at = EXCLUDED.canceled_at,\n                next_billed_at = EXCLUDED.next_billed_at,\n                updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2d9110a5de49844c76cc652b8ac3a76ba8958771c7f3a9834738b8f22134c914"
+}

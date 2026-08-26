@@ -1,11 +1,13 @@
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{self, FromRef, Path, Query, State},
+    http::HeaderMap,
     middleware,
     response::Html,
     routing::{get, post},
 };
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use rand::RngExt;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -16,13 +18,13 @@ use tower_http::{
     trace::{DefaultOnResponse, TraceLayer},
 };
 
-use tracing::{Level, debug, info};
+use tracing::{Level, debug, error, info, warn};
 
 use crate::{
     AppState, WebhookRequest, auth,
     db::stats::WebhookActivitySummary,
     error::AppError,
-    telemetry,
+    paddle, telemetry,
     webhook::{self, ssrf::validate_destination},
 };
 
@@ -39,10 +41,17 @@ struct HealthCheckResponse {
 }
 
 pub fn build(state: AppState) -> Router {
+    // CORS is scoped to the one route with a browser caller: the marketing
+    // site's signup form. Every other endpoint authenticates by API key or
+    // HMAC and has no browser callers, so it gets no CORS at all (browsers
+    // block the response, which is exactly right).
+    let cors = cors_for_signup(&state.cors_allowed_origins);
+
     let v1 = Router::new()
+        .route("/signup", post(signup))
+        .route_layer(cors)
         .route("/webhook", post(enqueue_webhook))
         .route("/webhook/{id}", get(webhook_status))
-        .route("/signup", post(signup))
         .route("/mock", post(mock))
         .route("/dlq", get(dlq))
         .route("/dlq/{id}/replay", post(dlq_replay))
@@ -53,6 +62,9 @@ pub fn build(state: AppState) -> Router {
     Router::new()
         .route("/ping", get(ping))
         .route("/health", get(health))
+        // Paddle → us; sits outside /v1 because it authenticates by HMAC
+        // signature, not by tenant API key.
+        .route("/webhooks/paddle", post(paddle_webhook))
         .nest("/v1", v1)
         // ServiceBuilder applies top-down: assign a request id first, then
         // open the trace span (so the id is visible inside it), then copy the
@@ -86,7 +98,19 @@ pub fn build(state: AppState) -> Router {
         .with_state(state)
 }
 
-const TRIAL_DURATION_DAYS: i64 = 14;
+fn cors_for_signup(origins: &[String]) -> tower_http::cors::CorsLayer {
+    use tower_http::cors::{AllowOrigin, CorsLayer};
+
+    let allowed: Vec<_> = origins
+        .iter()
+        .filter_map(|o| o.parse().ok())
+        .collect::<Vec<http::HeaderValue>>();
+
+    CorsLayer::new()
+        .allow_methods([axum::http::Method::POST])
+        .allow_headers([axum::http::header::CONTENT_TYPE])
+        .allow_origin(AllowOrigin::list(allowed))
+}
 
 /// Per-tenant cap on webhooks enqueued per calendar month.
 const MONTHLY_WEBHOOK_LIMIT: i64 = 50_000;
@@ -100,6 +124,104 @@ async fn health() -> Json<HealthCheckResponse> {
         status: 200,
         message: "healthy".into(),
     })
+}
+
+#[derive(Serialize)]
+struct PaddleWebhookAck {
+    received: bool,
+    duplicate: bool,
+}
+
+/// Receive a Paddle webhook delivery.
+///
+/// Status codes follow Paddle's contract — only 2xx within 5s counts as
+/// delivered, every non-2xx is retried on the same budget — so none of
+/// these responses can lose an event that a later attempt could deliver:
+///
+/// - 503 — no webhook secret configured (deployment issue; loud + retried)
+/// - 400 — structurally unusable request (missing signature/body, malformed
+///   header, unparseable JSON). Redelivery is byte-identical, so retrying
+///   can't help, but it keeps the dashboard's failure log honest.
+/// - 401 — HMAC mismatch or stale timestamp. A rotated secret recovers on
+///   the next retry after redeploy; a forged request is harmlessly retried.
+/// - 500 — transient (DB); the dedup ledger + processing share one
+///   transaction, so a rolled-back attempt is retried cleanly.
+async fn paddle_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<PaddleWebhookAck>, (StatusCode, &'static str)> {
+    use paddle::signature::SignatureError;
+
+    let Some(secret) = state.paddle_webhook_secret.as_deref() else {
+        error!("PADDLE_WEBHOOK_SECRET not set; refusing delivery so Paddle retries");
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "webhook secret not configured",
+        ));
+    };
+
+    let signature = headers
+        .get("paddle-signature")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    if signature.is_empty() || body.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "missing signature or body"));
+    }
+
+    // Verified against the exact bytes received — never a re-serialization.
+    match paddle::signature::verify_signature(signature, &body, secret, Utc::now()) {
+        Ok(()) => {}
+        Err(SignatureError::MalformedHeader | SignatureError::BadTimestamp) => {
+            return Err((StatusCode::BAD_REQUEST, "malformed signature header"));
+        }
+        Err(e @ (SignatureError::StaleTimestamp | SignatureError::Mismatch)) => {
+            warn!(error = %e, "paddle signature verification failed");
+            return Err((StatusCode::UNAUTHORIZED, "invalid signature"));
+        }
+    }
+
+    let event: paddle::events::PaddleEvent = match serde_json::from_slice(&body) {
+        Ok(event) => event,
+        Err(e) => {
+            warn!(error = %e, "paddle webhook body is not a parseable event");
+            return Err((StatusCode::BAD_REQUEST, "unparseable event"));
+        }
+    };
+
+    let mut tx = state.pg_pool.begin().await.map_err(paddle_db_error)?;
+    let is_new = paddle::sync::record_event(
+        &mut tx,
+        &event.event_id,
+        &event.event_type,
+        event.occurred_at,
+    )
+    .await
+    .map_err(paddle_db_error)?;
+
+    if is_new {
+        paddle::process_event(&mut tx, &event, state.paddle_api.as_ref())
+            .await
+            .map_err(paddle_db_error)?;
+    }
+    tx.commit().await.map_err(paddle_db_error)?;
+
+    info!(
+        event_type = %event.event_type,
+        event_id = %event.event_id,
+        duplicate = !is_new,
+        "paddle webhook accepted"
+    );
+
+    Ok(Json(PaddleWebhookAck {
+        received: true,
+        duplicate: !is_new,
+    }))
+}
+
+fn paddle_db_error(e: sqlx::Error) -> (StatusCode, &'static str) {
+    error!(error = ?e, "paddle webhook database error");
+    (StatusCode::INTERNAL_SERVER_ERROR, "internal error")
 }
 
 #[derive(Serialize)]
@@ -140,9 +262,17 @@ async fn enqueue_webhook(
     ))
 }
 
+/// Signup creates a free-tier tenant and returns credentials once.
+///
+/// Signup is the front door: it is open (no invite code required), keys do
+/// not expire, and any Paddle customer already mirroring this email is
+/// linked and its tier applied immediately — so billing state is consistent
+/// the moment the account exists, not at Paddle's next webhook.
 #[derive(Deserialize)]
 struct SignupRequest {
-    invite_code: String,
+    /// Optional invite code. Absent codes are fine; a present-but-invalid
+    /// code is rejected so a typo'd code never silently loses its perk.
+    invite_code: Option<String>,
     name: String,
     email: String,
 }
@@ -152,7 +282,23 @@ struct SignupResponse {
     tenant_id: uuid::Uuid,
     api_key: String,
     hmac_secret: String,
-    expires_at: chrono::DateTime<Utc>,
+}
+
+/// Deliberately loose: exactly one `@`, non-empty local part, a dot in the
+/// domain, no whitespace, sane lengths. Signup's job is to keep junk out of
+/// the Paddle email-linkage — not to prove the inbox exists.
+fn is_valid_email(email: &str) -> bool {
+    let Some((local, domain)) = email.split_once('@') else {
+        return false;
+    };
+    !local.is_empty()
+        && local.len() <= 64
+        && domain.len() <= 251
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && !domain.contains('@')
+        && !email.chars().any(char::is_whitespace)
 }
 
 async fn signup(
@@ -163,27 +309,49 @@ async fn signup(
         return Err(AppError::TooManyRequests);
     };
 
+    // Normalize before anything touches the database: emails are stored
+    // lowercased on both sides of the Paddle linkage (signup and the
+    // customer mirror), so "You@Example.com" at signup still links to the
+    // "you@example.com" Paddle collected at checkout. Mobile keyboards
+    // autocapitalize; the linkage must not care.
+    let email = body.email.trim().to_lowercase();
+    let name = body.name.trim().to_owned();
+    let invite_code = body
+        .invite_code
+        .as_deref()
+        .map(str::trim)
+        .filter(|code| !code.is_empty());
+
+    if name.is_empty() {
+        return Err(AppError::NameRequired);
+    }
+    if !is_valid_email(&email) {
+        return Err(AppError::InvalidEmail);
+    }
+
     let hmac_secret = auth::generate_hmac_secret();
-    let email_parsed = body.email;
 
     let mut tx = state.pg_pool.begin().await?;
 
-    let tenant_id =
-        crate::db::tenants::create_tenant(&mut tx, &body.name, &email_parsed, &hmac_secret).await?;
+    let tenant_id = crate::db::tenants::create_tenant(&mut tx, &name, &email, &hmac_secret).await?;
 
-    // redeem invite code for this tenant
-    crate::db::tenants::redeem_invite_code(&mut tx, &body.invite_code, tenant_id).await?;
+    if let Some(invite_code) = invite_code {
+        crate::db::tenants::redeem_invite_code(&mut tx, invite_code, tenant_id).await?;
+    }
 
-    // if that worked, create and serve their api key
+    // Keys don't expire: the product boundary is tier/quota enforcement,
+    // not a time-based trial. A key that lapses mid-subscription would lock
+    // a paying customer out.
     let raw_key = auth::generate_api_key();
     let key_hash = auth::hash_api_key(&raw_key);
-    let expires_at = Utc::now() + Duration::days(TRIAL_DURATION_DAYS);
 
-    crate::db::tenants::create_api_key(&mut tx, tenant_id, &key_hash, "trial", expires_at).await?;
+    crate::db::tenants::create_api_key(&mut tx, tenant_id, &key_hash, "signup", None).await?;
+
+    paddle::sync::link_tenant_and_apply_tier(&mut tx, tenant_id, &body.email).await?;
 
     tx.commit().await?;
 
-    info!(tenant_id = %tenant_id, "New trial tenant signed up");
+    info!(tenant_id = %tenant_id, "New tenant signed up");
 
     Ok((
         StatusCode::CREATED,
@@ -191,7 +359,6 @@ async fn signup(
             tenant_id,
             api_key: raw_key,
             hmac_secret,
-            expires_at,
         }),
     ))
 }
@@ -505,5 +672,35 @@ mod tests {
         assert_eq!(json["status"], "pending");
         assert_eq!(json["attempts"], 3);
         assert_eq!(json["last_error"], "500 Internal Server Error");
+    }
+
+    #[test]
+    fn email_validator_accepts_real_shapes() {
+        for good in [
+            "you@example.com",
+            "first.last+tag@sub.example.co",
+            "a@b.io",
+            "USER@EXAMPLE.COM",
+        ] {
+            assert!(is_valid_email(good), "should accept {good}");
+        }
+    }
+
+    #[test]
+    fn email_validator_rejects_junk() {
+        for bad in [
+            "",
+            "no-at-sign",
+            "@example.com",
+            "user@",
+            "user@example",
+            "user @example.com",
+            "user@exa mple.com",
+            "a@b@c.com",
+            "user@.example.com",
+            "user@example.com.",
+        ] {
+            assert!(!is_valid_email(bad), "should reject {bad:?}");
+        }
     }
 }

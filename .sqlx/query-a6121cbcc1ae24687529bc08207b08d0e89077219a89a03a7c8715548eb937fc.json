@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.status, s.tier\n            FROM paddle_subscriptions s\n            JOIN paddle_customers c\n              ON c.paddle_customer_id = s.paddle_customer_id\n            WHERE c.tenant_id = $1\n            ORDER BY s.updated_at DESC\n            LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "tier",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "a6121cbcc1ae24687529bc08207b08d0e89077219a89a03a7c8715548eb937fc"
+}

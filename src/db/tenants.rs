@@ -85,12 +85,13 @@ pub async fn get_hmac_secret(
     .await
 }
 
+/// `expires_at` is `None` for keys that live as long as the account does.
 pub async fn create_api_key(
     conn: &mut sqlx::PgConnection,
     tenant_id: uuid::Uuid,
     key_hash: &str,
     name: &str,
-    expires_at: DateTime<Utc>,
+    expires_at: Option<DateTime<Utc>>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"INSERT INTO api_keys (tenant_id, key_hash, name, expires_at) 

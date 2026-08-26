@@ -5,6 +5,17 @@ pub struct AppConfig {
     pub database_url: String,
     pub schema: String,
     pub port: u16,
+    // Secret for verifying Paddle webhook signatures. Optional at parse time
+    // so the API still boots without billing configured.
+    pub paddle_webhook_secret: Option<String>,
+    // Server-side Paddle API key + base URL, used to hydrate stub customers
+    // during webhook processing (see paddle::api). Sandbox URL is the
+    // default; at go-live set PADDLE_API_URL=https://api.paddle.com.
+    pub paddle_api_key: Option<String>,
+    pub paddle_api_url: String,
+    // Browser origins allowed to call /v1/signup (the marketing site's
+    // signup form). Comma-separated; defaults to the production site.
+    pub cors_allowed_origins: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -37,10 +48,33 @@ impl AppConfig {
             .parse::<u16>()
             .map_err(|_| ConfigError::MissingVar("PORT (invalid u16)".into()))?;
 
+        let paddle_webhook_secret = std::env::var("PADDLE_WEBHOOK_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty());
+
+        let paddle_api_key = std::env::var("PADDLE_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
+
+        let paddle_api_url = std::env::var("PADDLE_API_URL")
+            .unwrap_or_else(|_| "https://sandbox-api.paddle.com".into());
+
+        let cors_allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS")
+            .unwrap_or_else(|_| "https://heraldq.com,https://www.heraldq.com".into())
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+
         Ok(AppConfig {
             database_url,
             schema,
             port,
+            paddle_webhook_secret,
+            paddle_api_key,
+            paddle_api_url,
+            cors_allowed_origins,
         })
     }
 }
