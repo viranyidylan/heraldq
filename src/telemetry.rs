@@ -251,3 +251,106 @@ pub fn spawn_queue_depth_poller(pool: PgPool) {
         }
     });
 }
+
+/// Billing drift in one snapshot — the numbers the billing poller exports
+/// and the drift tests assert against. Zero across the board means the
+/// Paddle mirror and tenant state agree.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct BillingDrift {
+    /// Customers still email-less an hour after we last saw them. Fresh
+    /// stubs are normal (`customer.created` in flight); old ones mean
+    /// hydration never happened — a repeat buyer is walking around unpaid.
+    pub unhydrated_stubs: i64,
+    /// Linked customers whose latest mirrored subscription implies a
+    /// different tier than the tenant holds — an upgrade or downgrade that
+    /// never landed.
+    pub tier_mismatches: i64,
+    /// Active subscriptions whose customer has no tenant at all: someone
+    /// is paying and no account exists to upgrade.
+    pub tenantless_subscriptions: i64,
+}
+
+/// Snapshot of billing drift from the paddle mirror. This query is the
+/// source of truth for both the exported gauges and the tests — same SQL,
+/// no drift between what we alert on and what we verify.
+pub async fn billing_drift_snapshot(pool: &PgPool) -> Result<BillingDrift, sqlx::Error> {
+    let stubs = sqlx::query_scalar!(
+        r#"SELECT count(*) FROM paddle_customers
+            WHERE email = '' AND updated_at < now() - interval '1 hour'"#
+    )
+    .fetch_one(pool)
+    .await?
+    .unwrap_or(0);
+
+    let mismatches = sqlx::query_scalar!(
+        r#"SELECT count(*)
+            FROM paddle_customers c
+            JOIN tenants t ON t.id = c.tenant_id
+            JOIN LATERAL (
+                SELECT s.status, s.tier
+                FROM paddle_subscriptions s
+                WHERE s.paddle_customer_id = c.paddle_customer_id
+                ORDER BY s.updated_at DESC
+                LIMIT 1
+            ) s ON true
+            WHERE (s.status IN ('active', 'trialing', 'past_due')
+                    AND s.tier IS NOT NULL
+                    AND s.tier::text <> t.tier::text)
+               OR (s.status IN ('paused', 'canceled') AND t.tier::text <> 'free')"#
+    )
+    .fetch_one(pool)
+    .await?
+    .unwrap_or(0);
+
+    let tenantless = sqlx::query_scalar!(
+        r#"SELECT count(*)
+            FROM paddle_subscriptions s
+            JOIN paddle_customers c ON c.paddle_customer_id = s.paddle_customer_id
+            WHERE s.status IN ('active', 'trialing', 'past_due')
+              AND (c.tenant_id IS NULL OR c.email = '')"#
+    )
+    .fetch_one(pool)
+    .await?
+    .unwrap_or(0);
+
+    Ok(BillingDrift {
+        unhydrated_stubs: stubs,
+        tier_mismatches: mismatches,
+        tenantless_subscriptions: tenantless,
+    })
+}
+
+/// Billing drift is money, not latency — five minutes is plenty.
+const BILLING_DRIFT_POLL_INTERVAL: Duration = Duration::from_secs(300);
+
+/// Spawn a background task that exports billing-drift gauges:
+///
+/// - `heraldq_paddle_unhydrated_stubs`
+/// - `heraldq_paddle_tier_drift`
+/// - `heraldq_paddle_tenantless_subscriptions`
+///
+/// Each gauge is zero when the mirror agrees with tenant state; anything
+/// nonzero is a paid customer not getting what they paid for (or a free
+/// customer keeping what they stopped paying for). The incident that
+/// motivated this: a repeat buyer whose `customer.created` predated the
+/// webhook destination sat on `free` for hours with no signal. Same
+/// failure mode now alerts within a poll interval.
+pub fn spawn_billing_drift_poller(pool: PgPool) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(BILLING_DRIFT_POLL_INTERVAL);
+        loop {
+            tick.tick().await;
+
+            match billing_drift_snapshot(&pool).await {
+                Ok(d) => {
+                    metrics::gauge!("heraldq_paddle_unhydrated_stubs")
+                        .set(d.unhydrated_stubs as f64);
+                    metrics::gauge!("heraldq_paddle_tier_drift").set(d.tier_mismatches as f64);
+                    metrics::gauge!("heraldq_paddle_tenantless_subscriptions")
+                        .set(d.tenantless_subscriptions as f64);
+                }
+                Err(e) => warn!(error = ?e, "billing drift poll failed, skipping tick"),
+            }
+        }
+    });
+}

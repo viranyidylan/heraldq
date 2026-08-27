@@ -212,6 +212,11 @@ async fn paddle_webhook(
         duplicate = !is_new,
         "paddle webhook accepted"
     );
+    metrics::counter!(
+        "heraldq_paddle_webhooks_total",
+        "outcome" => if is_new { "accepted" } else { "duplicate" }
+    )
+    .increment(1);
 
     Ok(Json(PaddleWebhookAck {
         received: true,

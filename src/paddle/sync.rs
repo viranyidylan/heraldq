@@ -172,6 +172,7 @@ async fn hydrate_stub_customer(
     }
 
     let Some(api) = api else {
+        metrics::counter!("heraldq_paddle_hydration_total", "outcome" => "deferred").increment(1);
         warn!(
             paddle_customer_id = customer_id,
             "stub customer and no PADDLE_API_KEY — email link deferred to a customer event"
@@ -180,13 +181,25 @@ async fn hydrate_stub_customer(
     };
 
     match api.get_customer(customer_id).await {
-        Ok(customer) => upsert_customer(&mut *conn, &customer).await,
+        Ok(customer) => {
+            metrics::counter!("heraldq_paddle_hydration_total", "outcome" => "fetched")
+                .increment(1);
+            upsert_customer(&mut *conn, &customer).await
+        }
         Err(crate::paddle::api::ApiError::Transient(detail)) => {
+            // Counted before failing the webhook: the 500 is also visible in
+            // the route's HTTP error metrics, but this counter keeps the
+            // cause separable from database errors.
+            metrics::counter!("heraldq_paddle_hydration_total", "outcome" => "transient")
+                .increment(1);
             error!(paddle_customer_id = customer_id, %detail,
                 "transient Paddle API failure — failing the webhook so Paddle retries");
             Err(sqlx::Error::Io(std::io::Error::other(detail)))
         }
         Err(crate::paddle::api::ApiError::Permanent(detail)) => {
+            // The dangerous silent path: the webhook still 200s, so nothing
+            // outside this counter would ever show it.
+            metrics::counter!("heraldq_paddle_hydration_total", "outcome" => "failed").increment(1);
             error!(paddle_customer_id = customer_id, %detail,
                 "cannot hydrate stub customer — skipping");
             Ok(())

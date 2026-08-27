@@ -76,6 +76,71 @@ groups:
             down or wedged, Postgres contention, or intake far beyond
             capacity.
 
+      # Billing drift: a customer whose latest mirrored subscription implies
+      # a different tier than their tenant holds. Every drift is money — a
+      # paying customer on free (under-served) or a canceled customer on a
+      # paid tier (over-served). The poller refreshes every 5 minutes, so a
+      # sustained nonzero reading means the tier-propagation path is broken,
+      # not merely mid-flight.
+      - alert: HeraldQTierDrift
+        expr: heraldq_paddle_tier_drift > 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HeraldQ billing tier drift detected"
+          description: >-
+            {{ $value }} linked customer(s) hold a tier that disagrees with
+            their mirrored Paddle subscription. Check the webhook receiver
+            and paddle sync logs; the repeat-buyer hydration path
+            (PADDLE_API_KEY) is the usual suspect.
+
+      # Stub customers that never hydrated: subscription events arrived but
+      # the customer row is still email-less over an hour later. Fresh stubs
+      # are normal (customer.created in flight) — the poller only counts
+      # those older than an hour.
+      - alert: HeraldQStubCustomersLingering
+        expr: heraldq_paddle_unhydrated_stubs > 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "HeraldQ Paddle stub customers never hydrated"
+          description: >-
+            {{ $value }} paddle_customers row(s) have no email an hour after
+            their last event. Hydration (PADDLE_API_KEY set? Paddle API
+            healthy?) or the missing customer.created delivery failed.
+
+      # Someone is paying and no tenant account exists to receive the tier.
+      # With signup-first this should be structurally impossible; nonzero
+      # means checkout ran without an account (legacy data) or the signup
+      # linkage failed.
+      - alert: HeraldQTenantlessSubscriptions
+        expr: heraldq_paddle_tenantless_subscriptions > 0
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "HeraldQ paid subscriptions with no linked tenant"
+          description: >-
+            {{ $value }} active Paddle subscription(s) point at customers
+            with no tenant. A payer is not getting what they paid for —
+            reconcile by email in paddle_customers vs tenants.
+
+      # Permanent hydration failures are silent by design (the webhook still
+      # 200s so Paddle stops retrying): a bad API key or an unknown customer
+      # is only visible in this counter. Any occurrence warrants a look.
+      - alert: HeraldQHydrationFailures
+        expr: increase(heraldq_paddle_hydration_total{outcome="failed"}[30m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "HeraldQ stub hydration permanently failing"
+          description: >-
+            Hydration hit a permanent Paddle API error (rejected key or
+            unknown customer) {{ $value }} time(s) in 30m. The affected
+            customer row will not converge on its own.
+
       # The API is the tenant-facing front door: a 5xx here means we rejected
       # a webhook the customer believes they handed us. 4xx is deliberately
       # excluded — bad keys and malformed payloads are the caller's problem and

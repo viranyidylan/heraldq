@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*)\n            FROM paddle_subscriptions s\n            JOIN paddle_customers c ON c.paddle_customer_id = s.paddle_customer_id\n            WHERE s.status IN ('active', 'trialing', 'past_due')\n              AND (c.tenant_id IS NULL OR c.email = '')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b88b1bd7dfff7bce1c941481959941f37ed14b0019154088cc119a158eb23d3d"
+}
