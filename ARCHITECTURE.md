@@ -81,9 +81,9 @@ This is the core mental model. Trace it in the code:
 enqueue_webhook (routes.rs:110)
   │
   ├─ auth::ValidApiKey extractor → SHA-256 hash → lookup in api_keys
-  ├─ webhook_limiter.check_key(tenant_id)   per-tenant 10 req/s token bucket
+  ├─ tier_rate_limits.for_tier(tier)   per-tier keyed bucket (4/20/50 req/s)
   ├─ ssrf::validate_destination(policy, url)   HTTPS-only, no private IPs
-  ├─ db::quotas::increment_monthly_quota()   atomic, 50k/month cap
+  ├─ db::quotas::increment_monthly_quota()   atomic, tier-sized cap (5k–5M/mo)
   └─ webhook::enqueue() → graphile add_job(SendWebhook, job_key=ULID)
         │
         ▼  (job persists in graphile_worker.jobs)
@@ -204,9 +204,9 @@ following. Tests pin the classic evasion vectors (decimal/hex/octal IPs).
 
 | Control | Mechanism | Limit |
 |---|---|---|
-| Per-tenant enqueue rate | `governor` keyed token bucket | 10 req/s per tenant |
+| Enqueue rate | `governor` keyed buckets per tier (`TierRateLimits`) | 240 / 1.2k / 3k req per minute by tier |
 | Global signup rate | `governor` direct limiter | 100/min across all clients |
-| Monthly volume | Atomic DB upsert (`increment_monthly_quota`) | 50,000 webhooks/month |
+| Monthly volume | Atomic DB upsert, sized by `tiers::monthly_webhook_limit` | 5k / 50k / 500k / 5M by tier |
 | API key validity | `expires_at` column + check | No expiry; tier/quota is the boundary |
 
 The monthly quota is race-free: a single `INSERT ... ON CONFLICT DO UPDATE

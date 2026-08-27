@@ -112,9 +112,6 @@ fn cors_for_signup(origins: &[String]) -> tower_http::cors::CorsLayer {
         .allow_origin(AllowOrigin::list(allowed))
 }
 
-/// Per-tenant cap on webhooks enqueued per calendar month.
-const MONTHLY_WEBHOOK_LIMIT: i64 = 50_000;
-
 async fn ping(State(_state): State<AppState>) -> Result<&'static str, StatusCode> {
     Ok("pong")
 }
@@ -234,20 +231,26 @@ async fn enqueue_webhook(
     api_key: auth::ValidApiKey,
     extract::Json(request_body): extract::Json<WebhookRequest>,
 ) -> Result<(StatusCode, Json<EnqueueResponse>), AppError> {
-    info!(tenant_id = %api_key.tenant_id, "Webhook enqueue requested");
+    info!(tenant_id = %api_key.tenant_id, tier = %api_key.tier, "Webhook enqueue requested");
 
-    if state.webhook_limiter.check_key(&api_key.tenant_id).is_err() {
+    if state
+        .tier_rate_limits
+        .for_tier(&api_key.tier)
+        .check_key(&api_key.tenant_id)
+        .is_err()
+    {
         return Err(AppError::TooManyRequests);
     };
 
     validate_destination(&state.policy, &request_body.destination)?;
 
-    // Hard monthly cap, atomically counted in the DB. Only valid requests that
-    // will actually enqueue should burn a quota slot.
+    // Hard monthly cap, atomically counted in the DB, sized by the tenant's
+    // tier. Only valid requests that will actually enqueue should burn a
+    // quota slot.
     if !crate::db::quotas::increment_monthly_quota(
         &state.pg_pool,
         api_key.tenant_id,
-        MONTHLY_WEBHOOK_LIMIT,
+        crate::tiers::monthly_webhook_limit(&api_key.tier),
     )
     .await?
     {
@@ -532,9 +535,14 @@ async fn dlq_replay(
 ) -> Result<(StatusCode, Json<ReplayResponse>), AppError> {
     let tenant_id = api_key.tenant_id;
 
-    // Same per-tenant throttle as fresh enqueues: a replay is an outbound
+    // Same per-tier throttle as fresh enqueues: a replay is an outbound
     // webhook like any other.
-    if state.webhook_limiter.check_key(&tenant_id).is_err() {
+    if state
+        .tier_rate_limits
+        .for_tier(&api_key.tier)
+        .check_key(&tenant_id)
+        .is_err()
+    {
         return Err(AppError::TooManyRequests);
     };
 

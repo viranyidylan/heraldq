@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO tenant_monthly_quotas (tenant_id, month_start, webhook_count)\n         VALUES ($1, DATE_TRUNC('month', NOW())::date, 4999)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dd189d1bcde16df67789ffa0fa4187b640f749740970092c0dceac243db193ac"
+}

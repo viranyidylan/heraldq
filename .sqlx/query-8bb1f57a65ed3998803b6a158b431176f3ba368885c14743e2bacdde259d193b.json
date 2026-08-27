@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tenants\n                SET tier = $2::text::account_tier,\n                    delivered_retention_days = $3,\n                    dlq_retention_days = $4\n                WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8bb1f57a65ed3998803b6a158b431176f3ba368885c14743e2bacdde259d193b"
+}

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT delivered_retention_days, dlq_retention_days FROM tenants WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "delivered_retention_days",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "dlq_retention_days",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "dada47d50af9319e43b7fbee0d3c498364a67d42b2de43a2aa75bf720f1ef0de"
+}

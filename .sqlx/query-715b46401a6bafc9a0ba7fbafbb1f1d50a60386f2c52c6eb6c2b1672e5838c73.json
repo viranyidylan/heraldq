@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tenants t\n            SET tier = $2::text::account_tier,\n                delivered_retention_days = $3,\n                dlq_retention_days = $4\n            FROM paddle_customers c\n            WHERE c.paddle_customer_id = $1\n              AND (t.id = c.tenant_id\n                   OR (c.tenant_id IS NULL\n                       AND c.email <> ''\n                       AND t.email = c.email))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "715b46401a6bafc9a0ba7fbafbb1f1d50a60386f2c52c6eb6c2b1672e5838c73"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, tenant_id, expires_at FROM api_keys WHERE key_hash = $1 AND is_active = true",
+  "query": "SELECT ak.id, ak.tenant_id, ak.expires_at, t.tier::text AS \"tier!\"\n                FROM api_keys ak\n                JOIN tenants t ON t.id = ak.tenant_id\n                WHERE ak.key_hash = $1 AND ak.is_active = true",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,11 @@
         "ordinal": 2,
         "name": "expires_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "tier!",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -27,8 +32,9 @@
     "nullable": [
       false,
       false,
-      true
+      true,
+      null
     ]
   },
-  "hash": "045de032fac4c810823817ca15d97f2f9b7cd984e8c892548e073052eede0c25"
+  "hash": "10d8286bdb46783bc9138b6dacc2e6920a449a984b64a36ed59bce8314e25f26"
 }
