@@ -260,17 +260,33 @@ set. **Unset, every `metrics::` macro is a no-op** — a process with no
 `METRICS_PORT` is invisible. The exporter binds `::` (dual-stack) by default
 for Railway's IPv6-only private network.
 
-Key metrics:
+Key metrics ("process" matters — each binary exports only what it runs):
 
-| Metric | Source | Type |
-|---|---|---|
-| `heraldq_http_requests_total{method,path,status}` | API middleware | counter |
-| `heraldq_http_request_duration_seconds{method,path}` | API middleware | histogram |
-| `heraldq_webhook_delivery_duration_seconds` | dispatch.rs | histogram |
-| `heraldq_webhooks_delivered_total` | dispatch.rs | counter |
-| `heraldq_webhooks_dead_lettered_total` | dispatch.rs | counter |
-| `heraldq_dlq_write_failures_total` | dispatch.rs | counter (critical) |
-| `heraldq_queue_depth` / `heraldq_queue_oldest_job_age_seconds` | worker poller | gauge |
+| Metric | Process | Source | Type |
+|---|---|---|---|
+| `heraldq_http_requests_total{method,path,status}` | api | middleware | counter |
+| `heraldq_http_request_duration_seconds{method,path}` | api | middleware | histogram |
+| `heraldq_webhooks_enqueued_total{outcome}` | api | enqueue handler | counter |
+| `heraldq_signups_total{outcome}` | api | signup handler | counter |
+| `heraldq_webhook_delivery_duration_seconds` | worker | dispatch.rs | histogram |
+| `heraldq_webhooks_delivered_total` | worker | dispatch.rs | counter |
+| `heraldq_webhooks_attempts_retried_total` | worker | dispatch.rs | counter |
+| `heraldq_webhooks_dead_lettered_total` | worker | dispatch.rs | counter |
+| `heraldq_dlq_write_failures_total` | worker | dispatch.rs | counter (critical) |
+| `heraldq_retention_deleted_total{table}` | worker | retention sweeper | counter |
+| `heraldq_queue_depth` / `heraldq_queue_oldest_job_age_seconds` | worker | poller | gauge |
+
+Naming has one historical quirk: delivery metrics are singular
+(`webhook_delivery_duration`) while outcome counters are plural
+(`webhooks_delivered_total`). Kept as-is — renaming churns dashboards and
+alert rules for zero function. New metrics: outcome counters are plural
+(`..._total{outcome=...}`), everything else singular.
+
+Alerts live in exactly one place, `alerts/heraldq.rules.yml` — evaluated
+by local Prometheus (`observability/prometheus.sh`) and by Grafana
+Cloud's ruler in production. Dashboards in
+`observability/grafana/dashboards/heraldq.json` (Prometheus for rates
+and gauges, Postgres datasource for per-tenant forensics).
 
 **Cardinality discipline:** the `path` label is the route template
 (`/v1/webhook/{id}`), never the concrete URI — `MatchedPath` prevents
