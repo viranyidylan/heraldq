@@ -1,12 +1,12 @@
 {
   "uid": "heraldq-overview",
-  "title": "HeraldQ \u2014 Service Overview",
+  "title": "HeraldQ — Service Overview",
   "tags": [
     "heraldq"
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 5,
+  "version": 6,
   "refresh": "30s",
   "time": {
     "from": "now-6h",
@@ -22,7 +22,7 @@
     {
       "id": 100,
       "type": "row",
-      "title": "API \u2014 front door  \u00b7  Prometheus",
+      "title": "API — front door  ·  Prometheus",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -36,7 +36,7 @@
       "id": 101,
       "type": "timeseries",
       "title": "Request rate (by route)",
-      "description": "Requests/sec per route template. The 'R' in RED. Route templates, never concrete URIs \u2014 see track_metrics in src/telemetry.rs.",
+      "description": "Requests/sec per route template. The 'R' in RED. Route templates, never concrete URIs — see track_metrics in src/telemetry.rs.",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -146,7 +146,7 @@
       "id": 103,
       "type": "timeseries",
       "title": "Latency p50 / p99 (by route)",
-      "description": "The 'D' in RED. Computed from histogram buckets, not summary quantiles \u2014 bucket counts are aggregatable across replicas, pre-computed quantiles are not (you cannot average p99s). HeraldQApiLatencyHigh fires on p99 > 1s.",
+      "description": "The 'D' in RED. Computed from histogram buckets, not summary quantiles — bucket counts are aggregatable across replicas, pre-computed quantiles are not (you cannot average p99s). HeraldQApiLatencyHigh fires on p99 > 1s.",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -214,7 +214,7 @@
     {
       "id": 110,
       "type": "row",
-      "title": "Delivery pipeline  \u00b7  Prometheus",
+      "title": "Delivery pipeline  ·  Prometheus",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -289,7 +289,7 @@
       "id": 112,
       "type": "timeseries",
       "title": "Delivery duration p50 / p99",
-      "description": "Time for the outbound POST to the customer endpoint. NOT end-to-end: this excludes queue wait. For the number a customer actually experiences, see 'Sent \u2192 received latency' in the forensics row, which measures delivered_at - enqueued_at.",
+      "description": "Time for the outbound POST to the customer endpoint. NOT end-to-end: this excludes queue wait. For the number a customer actually experiences, see 'Sent → received latency' in the forensics row, which measures delivered_at - enqueued_at.",
       "gridPos": {
         "h": 7,
         "w": 12,
@@ -337,14 +337,76 @@
       ]
     },
     {
+      "id": 113,
+      "type": "stat",
+      "title": "DLQ write failures (1h)",
+      "description": "heraldq_dlq_write_failures_total - the single silent-data-loss path: a webhook exhausted retries AND its dead-letter row failed to write. Alerts as HeraldQDlqWriteFailure; this panel keeps the dashboard honest about it.",
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "sum(increase(heraldq_dlq_write_failures_total[1h]))",
+          "legendFormat": "DLQ write failures (1h)",
+          "range": true
+        }
+      ]
+    },
+    {
       "id": 120,
       "type": "row",
-      "title": "Queue health  \u00b7  Prometheus",
+      "title": "Queue health  ·  Prometheus",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 16
+        "y": 23
       },
       "collapsed": false,
       "panels": []
@@ -353,12 +415,12 @@
       "id": 121,
       "type": "timeseries",
       "title": "Queue depth over time",
-      "description": "Runnable jobs: due, unclaimed, not retry-exhausted. Complements the SQL 'Queue depth (now)' tile below, which can only ever show the current instant \u2014 this shows whether depth is trending up or draining.",
+      "description": "Runnable jobs: due, unclaimed, not retry-exhausted. Complements the SQL 'Queue depth (now)' tile below, which can only ever show the current instant — this shows whether depth is trending up or draining.",
       "gridPos": {
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 17
+        "y": 24
       },
       "datasource": {
         "type": "prometheus",
@@ -399,7 +461,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 17
+        "y": 24
       },
       "datasource": {
         "type": "prometheus",
@@ -456,12 +518,12 @@
     {
       "id": 130,
       "type": "row",
-      "title": "Delivery forensics  \u00b7  Postgres",
+      "title": "Delivery forensics  ·  Postgres",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 31
       },
       "collapsed": false,
       "panels": []
@@ -475,7 +537,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 25
+        "y": 32
       },
       "datasource": {
         "type": "postgres",
@@ -523,7 +585,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 25
+        "y": 32
       },
       "datasource": {
         "type": "postgres",
@@ -571,7 +633,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 25
+        "y": 32
       },
       "datasource": {
         "type": "postgres",
@@ -638,7 +700,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 25
+        "y": 32
       },
       "datasource": {
         "type": "postgres",
@@ -698,13 +760,13 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "Throughput \u2014 delivered vs dead-lettered",
+      "title": "Throughput — delivered vs dead-lettered",
       "description": "Counts bucketed over time. Delivered keyed on delivered_at, failures on abandoned_at.",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 29
+        "y": 36
       },
       "datasource": {
         "type": "postgres",
@@ -788,13 +850,13 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Sent \u2192 received latency (delivery time)",
+      "title": "Sent → received latency (delivery time)",
       "description": "End-to-end queue+delivery latency per bucket: delivered_at - enqueued_at. avg and max.",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 29
+        "y": 36
       },
       "datasource": {
         "type": "postgres",
@@ -837,12 +899,12 @@
       "id": 7,
       "type": "stat",
       "title": "Latency percentiles (window)",
-      "description": "Distribution of sent\u2192received latency over the range.",
+      "description": "Distribution of sent→received latency over the range.",
       "gridPos": {
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 37
+        "y": 44
       },
       "datasource": {
         "type": "postgres",
@@ -909,7 +971,7 @@
         "h": 8,
         "w": 8,
         "x": 6,
-        "y": 37
+        "y": 44
       },
       "datasource": {
         "type": "postgres",
@@ -953,13 +1015,13 @@
     {
       "id": 9,
       "type": "barchart",
-      "title": "Retry distribution \u2014 attempts by outcome",
+      "title": "Retry distribution — attempts by outcome",
       "description": "Attempts taken to reach a terminal state. delivered/dead-lettered come from the stored attempts column (populated for new traffic; old rows predate it); in-flight is current graphile_worker jobs. A right-shifted distribution means endpoints are forcing retries.",
       "gridPos": {
         "h": 8,
         "w": 10,
         "x": 14,
-        "y": 37
+        "y": 44
       },
       "datasource": {
         "type": "postgres",
@@ -1048,13 +1110,13 @@
     {
       "id": 10,
       "type": "table",
-      "title": "Bad endpoints \u2014 failure leaderboard (all time)",
-      "description": "Destinations ranked by failures, with fail %. High-cardinality by design \u2014 this is why it lives in SQL, not a Prometheus label.",
+      "title": "Bad endpoints — failure leaderboard (all time)",
+      "description": "Destinations ranked by failures, with fail %. High-cardinality by design — this is why it lives in SQL, not a Prometheus label.",
       "gridPos": {
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 52
       },
       "datasource": {
         "type": "postgres",
@@ -1128,12 +1190,12 @@
     {
       "id": 140,
       "type": "row",
-      "title": "Housekeeping  \u00b7  Prometheus",
+      "title": "Housekeeping  ·  Prometheus",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 54
+        "y": 61
       },
       "collapsed": false,
       "panels": []
@@ -1141,13 +1203,13 @@
     {
       "id": 141,
       "type": "timeseries",
-      "title": "Retention sweeper \u2014 rows deleted/hour",
+      "title": "Retention sweeper — rows deleted/hour",
       "description": "The retention sweeper swallows errors with a warn! and skips the cycle, so a wedged sweeper's ONLY symptom is this line going flat while the tables keep growing. Nothing alerts on it yet; this panel is the watch.",
       "gridPos": {
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 55
+        "y": 62
       },
       "datasource": {
         "type": "prometheus",
@@ -1175,6 +1237,376 @@
           },
           "expr": "sum by (table) (increase(heraldq_retention_deleted_total[1h]))",
           "legendFormat": "{{table}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 150,
+      "type": "row",
+      "title": "Intake & signup  ·  Prometheus",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 69
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 151,
+      "type": "timeseries",
+      "title": "Enqueue outcomes /sec",
+      "description": "heraldq_webhooks_enqueued_total{outcome}: enqueued, rate_limited, quota_exceeded, invalid_destination. quota_exceeded becomes a revenue-adjacent signal once tier quotas ship.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 70
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "sum by (outcome) (rate(heraldq_webhooks_enqueued_total[5m]))",
+          "legendFormat": "{{outcome}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 152,
+      "type": "timeseries",
+      "title": "Signups by outcome /min",
+      "description": "heraldq_signups_total{outcome} - the front door funnel. created is the growth signal; duplicate is expected noise; invalid and rate_limited patterns are the abuse signal.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 70
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "sum by (outcome) (rate(heraldq_signups_total[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 160,
+      "type": "row",
+      "title": "Billing health  ·  Prometheus",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 77
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 161,
+      "type": "stat",
+      "title": "Tier drift",
+      "description": "Linked customers whose tier disagrees with their latest mirrored Paddle subscription. Zero is the only healthy value; alerts as HeraldQTierDrift.",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 78
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "max(heraldq_paddle_tier_drift)",
+          "legendFormat": "Tier drift",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 162,
+      "type": "stat",
+      "title": "Unhydrated stubs (>1h)",
+      "description": "Paddle customer rows still email-less an hour after their last event - hydration never happened. Alerts as HeraldQStubCustomersLingering.",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 78
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "max(heraldq_paddle_unhydrated_stubs)",
+          "legendFormat": "Unhydrated stubs (>1h)",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 163,
+      "type": "stat",
+      "title": "Tenantless payers",
+      "description": "Active Paddle subscriptions with no tenant account to upgrade. Someone is paying and nobody is receiving. Alerts as HeraldQTenantlessSubscriptions.",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 78
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "max(heraldq_paddle_tenantless_subscriptions)",
+          "legendFormat": "Tenantless payers",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 164,
+      "type": "timeseries",
+      "title": "Stub hydration by outcome /sec",
+      "description": "heraldq_paddle_hydration_total{outcome}: fetched (healthy), deferred (no PADDLE_API_KEY - configuration gap), transient (will retry), failed (permanent - silent without this counter).",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 83
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "sum by (outcome) (rate(heraldq_paddle_hydration_total[5m]))",
+          "legendFormat": "{{outcome}}",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 165,
+      "type": "timeseries",
+      "title": "Paddle webhooks by outcome /sec",
+      "description": "heraldq_paddle_webhooks_total{outcome} - Paddle delivery health, separable from general API error rates. Duplicates are Paddle redeliveries being deduped, not double-processing.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 83
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "heraldq-prom"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "heraldq-prom"
+          },
+          "expr": "sum by (outcome) (rate(heraldq_paddle_webhooks_total[5m]))",
+          "legendFormat": "{{outcome}}",
           "range": true
         }
       ]
