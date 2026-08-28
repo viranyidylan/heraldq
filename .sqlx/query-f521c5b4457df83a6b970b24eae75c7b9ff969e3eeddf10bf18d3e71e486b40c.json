@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO tenants (name, tier, email, hmac_secret)\n            VALUES ('drift-test', $2::text::account_tier, $1, 'not-a-real-secret')\n            RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f521c5b4457df83a6b970b24eae75c7b9ff969e3eeddf10bf18d3e71e486b40c"
+}

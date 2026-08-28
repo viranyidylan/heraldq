@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO paddle_subscriptions (\n            paddle_subscription_id, paddle_customer_id, status, tier,\n            price_id, product_id)\n         VALUES ('sub_tierless', 'ctm_tierless', 'active', NULL, 'pri_test', 'pro_test')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "465f23c4c144221eed1acd47459abce9a9d7ce4395c694987b3c82a74b1ad37f"
+}
