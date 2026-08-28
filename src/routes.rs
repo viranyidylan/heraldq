@@ -245,11 +245,23 @@ async fn enqueue_webhook(
 ) -> Result<(StatusCode, Json<EnqueueResponse>), AppError> {
     info!(tenant_id = %api_key.tenant_id, "Webhook enqueue requested");
 
+    // Intake funnel: every exit from this handler counts its outcome. The
+    // 4xx status codes are already in heraldq_http_requests_total, but as
+    // raw slices — outcome labels make "why are we rejecting" answerable
+    // in one query (and quotable in the dashboard) without re-deriving it.
     if state.webhook_limiter.check_key(&api_key.tenant_id).is_err() {
+        metrics::counter!("heraldq_webhooks_enqueued_total", "outcome" => "rate_limited")
+            .increment(1);
         return Err(AppError::TooManyRequests);
     };
 
-    validate_destination(&state.policy, &request_body.destination)?;
+    if let Err(e) =
+        validate_destination(&state.policy, &request_body.destination).map_err(AppError::from)
+    {
+        metrics::counter!("heraldq_webhooks_enqueued_total", "outcome" => "invalid_destination")
+            .increment(1);
+        return Err(e);
+    }
 
     // Hard monthly cap, atomically counted in the DB. Only valid requests that
     // will actually enqueue should burn a quota slot.
@@ -260,10 +272,14 @@ async fn enqueue_webhook(
     )
     .await?
     {
+        metrics::counter!("heraldq_webhooks_enqueued_total", "outcome" => "quota_exceeded")
+            .increment(1);
         return Err(AppError::MonthlyQuotaExceeded);
     }
 
     let webhook_id = webhook::enqueue(&state.worker_utils, api_key.tenant_id, request_body).await?;
+
+    metrics::counter!("heraldq_webhooks_enqueued_total", "outcome" => "enqueued").increment(1);
 
     Ok((
         StatusCode::ACCEPTED,
@@ -314,7 +330,11 @@ async fn signup(
     State(state): State<AppState>,
     extract::Json(body): extract::Json<SignupRequest>,
 ) -> Result<(StatusCode, Json<SignupResponse>), AppError> {
+    // Signup funnel: one counter, one outcome label per exit. Duplicate is
+    // expected noise (double-clicks, retries); invalid and rate_limited are
+    // the signals worth watching as the open front door.
     if state.signup_limiter.check().is_err() {
+        metrics::counter!("heraldq_signups_total", "outcome" => "rate_limited").increment(1);
         return Err(AppError::TooManyRequests);
     };
 
@@ -332,9 +352,11 @@ async fn signup(
         .filter(|code| !code.is_empty());
 
     if name.is_empty() {
+        metrics::counter!("heraldq_signups_total", "outcome" => "invalid").increment(1);
         return Err(AppError::NameRequired);
     }
     if !is_valid_email(&email) {
+        metrics::counter!("heraldq_signups_total", "outcome" => "invalid").increment(1);
         return Err(AppError::InvalidEmail);
     }
 
@@ -342,7 +364,15 @@ async fn signup(
 
     let mut tx = state.pg_pool.begin().await?;
 
-    let tenant_id = crate::db::tenants::create_tenant(&mut tx, &name, &email, &hmac_secret).await?;
+    let tenant_id =
+        match crate::db::tenants::create_tenant(&mut tx, &name, &email, &hmac_secret).await {
+            Ok(id) => id,
+            Err(e @ AppError::EmailAlreadyRegistered) => {
+                metrics::counter!("heraldq_signups_total", "outcome" => "duplicate").increment(1);
+                return Err(e);
+            }
+            Err(e) => return Err(e),
+        };
 
     if let Some(invite_code) = invite_code {
         crate::db::tenants::redeem_invite_code(&mut tx, invite_code, tenant_id).await?;
@@ -356,11 +386,15 @@ async fn signup(
 
     crate::db::tenants::create_api_key(&mut tx, tenant_id, &key_hash, "signup", None).await?;
 
-    paddle::sync::link_tenant_and_apply_tier(&mut tx, tenant_id, &body.email).await?;
+    // `&email`, never `&body.email`: the linkage matches paddle_customers on
+    // the lowercased form, so passing the raw input here would silently miss
+    // the link for any mixed-case signup.
+    paddle::sync::link_tenant_and_apply_tier(&mut tx, tenant_id, &email).await?;
 
     tx.commit().await?;
 
     info!(tenant_id = %tenant_id, "New tenant signed up");
+    metrics::counter!("heraldq_signups_total", "outcome" => "created").increment(1);
 
     Ok((
         StatusCode::CREATED,
