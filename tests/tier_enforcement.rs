@@ -127,6 +127,57 @@ async fn monthly_quota_enforces_tier_limits(pool: PgPool) {
     assert_eq!(count, 5_000, "refused requests must not burn quota");
 }
 
+/// A negotiated override is the quota, regardless of tier. This is the
+/// enterprise mechanism: Paddle sells tiers, a human writes the deal into
+/// monthly_webhook_limit_override.
+#[sqlx::test]
+#[ignore = "needs live Postgres; CI runs SQLX_OFFLINE with no database"]
+async fn negotiated_override_is_the_quota_not_the_tier_default(pool: PgPool) {
+    let tenant_id = signup_tenant(&pool, "deal@test.invalid").await;
+
+    // The deal: 7 webhooks/month, on a free-tier tenant (default 5,000).
+    sqlx::query!(
+        "UPDATE tenants SET monthly_webhook_limit_override = 7 WHERE id = $1",
+        tenant_id,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let limit = sliq::tiers::effective_monthly_limit(
+        "free",
+        sqlx::query_scalar!(
+            "SELECT monthly_webhook_limit_override FROM tenants WHERE id = $1",
+            tenant_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+    );
+    assert_eq!(limit, 7, "the deal is the quota");
+
+    // Seed at 6: the 7th is the last allowed, the 8th refused.
+    sqlx::query!(
+        "INSERT INTO tenant_monthly_quotas (tenant_id, month_start, webhook_count)
+         VALUES ($1, DATE_TRUNC('month', NOW())::date, 6)",
+        tenant_id,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert!(
+        sliq::db::quotas::increment_monthly_quota(&pool, tenant_id, limit)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !sliq::db::quotas::increment_monthly_quota(&pool, tenant_id, limit)
+            .await
+            .unwrap()
+    );
+}
+
 /// Signup writes the free tier's retention (1 day history / 7 day DLQ),
 /// not the column defaults from migration 0009 (30/90).
 #[sqlx::test]

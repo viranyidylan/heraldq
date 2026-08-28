@@ -250,7 +250,10 @@ async fn enqueue_webhook(
     if !crate::db::quotas::increment_monthly_quota(
         &state.pg_pool,
         api_key.tenant_id,
-        crate::tiers::monthly_webhook_limit(&api_key.tier),
+        crate::tiers::effective_monthly_limit(
+            &api_key.tier,
+            api_key.monthly_webhook_limit_override,
+        ),
     )
     .await?
     {

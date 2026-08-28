@@ -42,6 +42,9 @@ pub struct ValidApiKey {
     /// Account tier of the key's tenant, read on the same lookup — drives
     /// per-tier quotas at enqueue time.
     pub tier: String,
+    /// Negotiated quota for this tenant (enterprise/comped deals), or
+    /// `None` to use the tier default. Read on the same lookup.
+    pub monthly_webhook_limit_override: Option<i64>,
 }
 
 impl<S> FromRequestParts<S> for ValidApiKey
@@ -61,7 +64,9 @@ where
 
         let hash = hex::encode(Sha256::digest(auth_token.as_bytes()));
         let row = sqlx::query!(
-            r#"SELECT ak.id, ak.tenant_id, ak.expires_at, t.tier::text AS "tier!"
+            r#"SELECT ak.id, ak.tenant_id, ak.expires_at,
+                    t.tier::text AS "tier!",
+                    t.monthly_webhook_limit_override
                 FROM api_keys ak
                 JOIN tenants t ON t.id = ak.tenant_id
                 WHERE ak.key_hash = $1 AND ak.is_active = true"#,
@@ -82,6 +87,7 @@ where
             api_key_id: row.id.to_string(),
             tenant_id: row.tenant_id,
             tier: row.tier,
+            monthly_webhook_limit_override: row.monthly_webhook_limit_override,
         })
     }
 }

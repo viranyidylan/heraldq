@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tenants SET monthly_webhook_limit_override = 7 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "90722fadf8f2b0f433ba17d3757eff47c2937f37c8b4a11e16acf9712878bfa5"
+}
