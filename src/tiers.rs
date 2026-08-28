@@ -5,8 +5,8 @@
 //! | tier          | webhooks/mo            | rate limit | history | DLQ |
 //! |---------------|------------------------|------------|---------|-----|
 //! | free          | 5,000                  | 240/min    | 1 day   | 7 days |
-//! | basic         | 50,000                 | 1,200/min  | 7 days  | 30 days |
-//! | professional  | 1,000,000              | 3,000/min  | 30 days | 90 days |
+//! | basic         | 100,000                | 1,200/min  | 7 days  | 30 days |
+//! | professional  | 2,000,000              | 3,000/min  | 30 days | 90 days |
 //! | enterprise    | negotiated per tenant  | 3,000/min  | 30 days | 90 days |
 //!
 //! Enterprise is not a priced tier — it is a negotiated one. A tenant with
@@ -23,12 +23,12 @@
 /// Monthly webhook enqueue cap.
 pub fn monthly_webhook_limit(tier: &str) -> i64 {
     match tier {
-        "basic" => 50_000,
+        "basic" => 100_000,
         // Enterprise defaults to professional: the actual quota comes from
         // the negotiated override, and a not-yet-negotiated enterprise
         // tenant should get the best priced tier's limits, not invented
         // ones.
-        "professional" | "enterprise" => 1_000_000,
+        "professional" | "enterprise" => 2_000_000,
         _ => 5_000,
     }
 }
@@ -67,8 +67,8 @@ mod tests {
     #[test]
     fn monthly_limits_match_pricing() {
         assert_eq!(monthly_webhook_limit("free"), 5_000);
-        assert_eq!(monthly_webhook_limit("basic"), 50_000);
-        assert_eq!(monthly_webhook_limit("professional"), 1_000_000);
+        assert_eq!(monthly_webhook_limit("basic"), 100_000);
+        assert_eq!(monthly_webhook_limit("professional"), 2_000_000);
         // Enterprise is negotiated; without an override it is professional.
         assert_eq!(
             monthly_webhook_limit("enterprise"),
