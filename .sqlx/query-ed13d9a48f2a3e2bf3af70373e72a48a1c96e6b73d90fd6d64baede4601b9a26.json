@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*)\n            FROM paddle_customers c\n            JOIN tenants t ON t.id = c.tenant_id\n            JOIN LATERAL (\n                SELECT s.status, s.tier\n                FROM paddle_subscriptions s\n                WHERE s.paddle_customer_id = c.paddle_customer_id\n                ORDER BY s.updated_at DESC\n                LIMIT 1\n            ) s ON true\n            WHERE (s.status IN ('active', 'trialing', 'past_due')\n                    AND (s.tier IS NULL OR s.tier::text <> t.tier::text))\n               OR (s.status IN ('paused', 'canceled') AND t.tier::text <> 'free')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ed13d9a48f2a3e2bf3af70373e72a48a1c96e6b73d90fd6d64baede4601b9a26"
+}

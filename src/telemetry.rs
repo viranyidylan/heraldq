@@ -263,7 +263,10 @@ pub struct BillingDrift {
     pub unhydrated_stubs: i64,
     /// Linked customers whose latest mirrored subscription implies a
     /// different tier than the tenant holds — an upgrade or downgrade that
-    /// never landed.
+    /// never landed. An active subscription with NO tier metadata counts
+    /// too: it means the Paddle catalog is missing `custom_data.tier` on a
+    /// live price (the sandbox catalog has it; a fresh live one might not),
+    /// which would otherwise silently never upgrade anyone.
     pub tier_mismatches: i64,
     /// Active subscriptions whose customer has no tenant at all: someone
     /// is paying and no account exists to upgrade.
@@ -294,8 +297,7 @@ pub async fn billing_drift_snapshot(pool: &PgPool) -> Result<BillingDrift, sqlx:
                 LIMIT 1
             ) s ON true
             WHERE (s.status IN ('active', 'trialing', 'past_due')
-                    AND s.tier IS NOT NULL
-                    AND s.tier::text <> t.tier::text)
+                    AND (s.tier IS NULL OR s.tier::text <> t.tier::text))
                OR (s.status IN ('paused', 'canceled') AND t.tier::text <> 'free')"#
     )
     .fetch_one(pool)

@@ -118,6 +118,31 @@ async fn each_drift_class_is_counted_independently(pool: PgPool) {
     assert_eq!(drift.tenantless_subscriptions, 1);
 }
 
+/// The cutover trap: an active subscription whose price carries no tier
+/// metadata (live catalog missing custom_data.tier) must count as drift —
+/// otherwise it silently upgrades nobody forever.
+#[sqlx::test]
+#[ignore = "needs live Postgres; CI runs SQLX_OFFLINE with no database"]
+async fn tierless_active_subscription_is_drift(pool: PgPool) {
+    let tenant = seed_tenant(&pool, "tierless@test.invalid", "free").await;
+    seed_customer(&pool, "ctm_tierless", "tierless@test.invalid", Some(tenant)).await;
+    sqlx::query!(
+        "INSERT INTO paddle_subscriptions (
+            paddle_subscription_id, paddle_customer_id, status, tier,
+            price_id, product_id)
+         VALUES ('sub_tierless', 'ctm_tierless', 'active', NULL, 'pri_test', 'pro_test')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let drift = billing_drift_snapshot(&pool).await.unwrap();
+    assert_eq!(
+        drift.tier_mismatches, 1,
+        "NULL tier on an active sub is drift"
+    );
+}
+
 /// Convergence must clear the gauges: after the fix that the alerts would
 /// have demanded, drift returns to zero with the same rows present.
 #[sqlx::test]

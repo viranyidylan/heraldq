@@ -91,9 +91,10 @@ groups:
           summary: "HeraldQ billing tier drift detected"
           description: >-
             {{ $value }} linked customer(s) hold a tier that disagrees with
-            their mirrored Paddle subscription. Check the webhook receiver
-            and paddle sync logs; the repeat-buyer hydration path
-            (PADDLE_API_KEY) is the usual suspect.
+            their mirrored Paddle subscription (or the subscription carries
+            no tier metadata — a live-catalog price missing custom_data.tier).
+            Check the webhook receiver and paddle sync logs; the
+            repeat-buyer hydration path (PADDLE_API_KEY) is the usual suspect.
 
       # Stub customers that never hydrated: subscription events arrived but
       # the customer row is still email-less over an hour later. Fresh stubs
