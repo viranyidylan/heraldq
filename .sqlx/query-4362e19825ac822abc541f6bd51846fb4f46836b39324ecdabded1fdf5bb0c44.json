@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tenants SET tier = 'professional'::text::account_tier\n            WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4362e19825ac822abc541f6bd51846fb4f46836b39324ecdabded1fdf5bb0c44"
+}

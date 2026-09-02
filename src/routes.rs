@@ -41,15 +41,19 @@ struct HealthCheckResponse {
 }
 
 pub fn build(state: AppState) -> Router {
-    // CORS is scoped to the one route with a browser caller: the marketing
-    // site's signup form. Every other endpoint authenticates by API key or
-    // HMAC and has no browser callers, so it gets no CORS at all (browsers
-    // block the response, which is exactly right).
+    // CORS is scoped to the routes with browser callers: the marketing
+    // site's signup form and (future) lost-key recovery form. Every other
+    // endpoint authenticates by API key or HMAC and has no browser callers,
+    // so it gets no CORS at all (browsers block the response, which is
+    // exactly right).
     let cors = cors_for_signup(&state.cors_allowed_origins);
 
     let v1 = Router::new()
         .route("/signup", post(signup))
+        .route("/keys/recover", post(recover_key))
         .route_layer(cors)
+        .route("/keys", get(list_keys))
+        .route("/keys/rotate", post(rotate_key))
         .route("/webhook", post(enqueue_webhook))
         .route("/webhook/{id}", get(webhook_status))
         .route("/mock", post(mock))
@@ -209,6 +213,11 @@ async fn paddle_webhook(
         duplicate = !is_new,
         "paddle webhook accepted"
     );
+    metrics::counter!(
+        "heraldq_paddle_webhooks_total",
+        "outcome" => if is_new { "accepted" } else { "duplicate" }
+    )
+    .increment(1);
 
     Ok(Json(PaddleWebhookAck {
         received: true,
@@ -233,16 +242,28 @@ async fn enqueue_webhook(
 ) -> Result<(StatusCode, Json<EnqueueResponse>), AppError> {
     info!(tenant_id = %api_key.tenant_id, tier = %api_key.tier, "Webhook enqueue requested");
 
+    // Intake funnel: every exit from this handler counts its outcome. The
+    // 4xx status codes are already in heraldq_http_requests_total, but as
+    // raw slices — outcome labels make "why are we rejecting" answerable
+    // in one query (and quotable in the dashboard) without re-deriving it.
     if state
         .tier_rate_limits
         .for_tier(&api_key.tier)
         .check_key(&api_key.tenant_id)
         .is_err()
     {
+        metrics::counter!("heraldq_webhooks_enqueued_total", "outcome" => "rate_limited")
+            .increment(1);
         return Err(AppError::TooManyRequests);
     };
 
-    validate_destination(&state.policy, &request_body.destination)?;
+    if let Err(e) =
+        validate_destination(&state.policy, &request_body.destination).map_err(AppError::from)
+    {
+        metrics::counter!("heraldq_webhooks_enqueued_total", "outcome" => "invalid_destination")
+            .increment(1);
+        return Err(e);
+    }
 
     // Hard monthly cap, atomically counted in the DB, sized by the tenant's
     // tier. Only valid requests that will actually enqueue should burn a
@@ -257,10 +278,14 @@ async fn enqueue_webhook(
     )
     .await?
     {
+        metrics::counter!("heraldq_webhooks_enqueued_total", "outcome" => "quota_exceeded")
+            .increment(1);
         return Err(AppError::MonthlyQuotaExceeded);
     }
 
     let webhook_id = webhook::enqueue(&state.worker_utils, api_key.tenant_id, request_body).await?;
+
+    metrics::counter!("heraldq_webhooks_enqueued_total", "outcome" => "enqueued").increment(1);
 
     Ok((
         StatusCode::ACCEPTED,
@@ -311,7 +336,11 @@ async fn signup(
     State(state): State<AppState>,
     extract::Json(body): extract::Json<SignupRequest>,
 ) -> Result<(StatusCode, Json<SignupResponse>), AppError> {
+    // Signup funnel: one counter, one outcome label per exit. Duplicate is
+    // expected noise (double-clicks, retries); invalid and rate_limited are
+    // the signals worth watching as the open front door.
     if state.signup_limiter.check().is_err() {
+        metrics::counter!("heraldq_signups_total", "outcome" => "rate_limited").increment(1);
         return Err(AppError::TooManyRequests);
     };
 
@@ -329,9 +358,11 @@ async fn signup(
         .filter(|code| !code.is_empty());
 
     if name.is_empty() {
+        metrics::counter!("heraldq_signups_total", "outcome" => "invalid").increment(1);
         return Err(AppError::NameRequired);
     }
     if !is_valid_email(&email) {
+        metrics::counter!("heraldq_signups_total", "outcome" => "invalid").increment(1);
         return Err(AppError::InvalidEmail);
     }
 
@@ -339,7 +370,15 @@ async fn signup(
 
     let mut tx = state.pg_pool.begin().await?;
 
-    let tenant_id = crate::db::tenants::create_tenant(&mut tx, &name, &email, &hmac_secret).await?;
+    let tenant_id =
+        match crate::db::tenants::create_tenant(&mut tx, &name, &email, &hmac_secret).await {
+            Ok(id) => id,
+            Err(e @ AppError::EmailAlreadyRegistered) => {
+                metrics::counter!("heraldq_signups_total", "outcome" => "duplicate").increment(1);
+                return Err(e);
+            }
+            Err(e) => return Err(e),
+        };
 
     if let Some(invite_code) = invite_code {
         crate::db::tenants::redeem_invite_code(&mut tx, invite_code, tenant_id).await?;
@@ -353,11 +392,15 @@ async fn signup(
 
     crate::db::tenants::create_api_key(&mut tx, tenant_id, &key_hash, "signup", None).await?;
 
-    paddle::sync::link_tenant_and_apply_tier(&mut tx, tenant_id, &body.email).await?;
+    // `&email`, never `&body.email`: the linkage matches paddle_customers on
+    // the lowercased form, so passing the raw input here would silently miss
+    // the link for any mixed-case signup.
+    paddle::sync::link_tenant_and_apply_tier(&mut tx, tenant_id, &email).await?;
 
     tx.commit().await?;
 
     info!(tenant_id = %tenant_id, "New tenant signed up");
+    metrics::counter!("heraldq_signups_total", "outcome" => "created").increment(1);
 
     Ok((
         StatusCode::CREATED,
@@ -366,6 +409,119 @@ async fn signup(
             api_key: raw_key,
             hmac_secret,
         }),
+    ))
+}
+
+#[derive(Serialize)]
+struct KeyResponse {
+    api_key: String,
+}
+
+/// Shared machinery for rotate and recover: revoke every active key, issue
+/// exactly one replacement, return its raw value once. Runs in a single
+/// transaction so there is never a moment with two live keys (rotation) or
+/// with a stolen key still valid (recovery).
+async fn replace_tenant_key(
+    state: &AppState,
+    tenant_id: uuid::Uuid,
+    name: &str,
+) -> Result<String, AppError> {
+    let raw_key = auth::generate_api_key();
+    let key_hash = auth::hash_api_key(&raw_key);
+
+    let mut tx = state.pg_pool.begin().await?;
+    crate::db::tenants::revoke_all_keys(&mut tx, tenant_id).await?;
+    crate::db::tenants::create_api_key(&mut tx, tenant_id, &key_hash, name, None).await?;
+    tx.commit().await?;
+
+    Ok(raw_key)
+}
+
+/// `POST /v1/keys/rotate` — swap the caller's key for a fresh one. The old
+/// key dies with the request, so rotation is also the "I think this leaked"
+/// panic button.
+async fn rotate_key(
+    State(state): State<AppState>,
+    api_key: auth::ValidApiKey,
+) -> Result<(StatusCode, Json<KeyResponse>), AppError> {
+    let raw_key = replace_tenant_key(&state, api_key.tenant_id, "rotated").await?;
+
+    info!(tenant_id = %api_key.tenant_id, "API key rotated");
+    Ok((StatusCode::OK, Json(KeyResponse { api_key: raw_key })))
+}
+
+#[derive(Deserialize)]
+struct RecoverRequest {
+    email: String,
+    hmac_secret: String,
+}
+
+/// `POST /v1/keys/recover` — lost-key recovery without email
+/// infrastructure. The account email plus the HMAC secret (shown next to
+/// the key at signup, and something the tenant functionally must keep to
+/// verify our webhook signatures) is the proof of account. Recovering
+/// revokes every existing key: whoever recovers, wins — and a surprised
+/// legitimate tenant whose key suddenly stopped working has just learned
+/// their secret leaked.
+///
+/// Unknown email and wrong secret answer identically (401, same body), so
+/// recovery can't be used to enumerate accounts.
+async fn recover_key(
+    State(state): State<AppState>,
+    extract::Json(body): extract::Json<RecoverRequest>,
+) -> Result<(StatusCode, Json<KeyResponse>), AppError> {
+    if state.signup_limiter.check().is_err() {
+        return Err(AppError::TooManyRequests);
+    };
+
+    let email = body.email.trim().to_lowercase();
+    let tenant_id = match crate::db::tenants::find_tenant_for_recovery(
+        &state.pg_pool,
+        &email,
+        &body.hmac_secret,
+    )
+    .await?
+    {
+        Some(id) => id,
+        None => {
+            warn!("key recovery failed: email/secret mismatch");
+            return Err(AppError::Unauthorized);
+        }
+    };
+
+    let raw_key = replace_tenant_key(&state, tenant_id, "recovered").await?;
+
+    info!(tenant_id = %tenant_id, "API key recovered");
+    Ok((StatusCode::OK, Json(KeyResponse { api_key: raw_key })))
+}
+
+#[derive(Serialize)]
+struct ApiKeyInfoResponse {
+    id: uuid::Uuid,
+    name: String,
+    created_at: chrono::DateTime<Utc>,
+    expires_at: Option<chrono::DateTime<Utc>>,
+    is_active: bool,
+}
+
+/// `GET /v1/keys` — key metadata for the caller's tenant. Never includes
+/// hashes or raw values; those exist only at issue time.
+async fn list_keys(
+    State(state): State<AppState>,
+    api_key: auth::ValidApiKey,
+) -> Result<Json<Vec<ApiKeyInfoResponse>>, AppError> {
+    let keys = crate::db::tenants::list_keys(&state.pg_pool, api_key.tenant_id).await?;
+
+    Ok(Json(
+        keys.into_iter()
+            .map(|k| ApiKeyInfoResponse {
+                id: k.id,
+                name: k.name,
+                created_at: k.created_at,
+                expires_at: k.expires_at,
+                is_active: k.is_active,
+            })
+            .collect(),
     ))
 }
 

@@ -53,6 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Database connection established");
 
     telemetry::spawn_queue_depth_poller(pg_pool.clone());
+    telemetry::spawn_billing_drift_poller(pg_pool.clone());
     db::retention::spawn_sweeper(pg_pool.clone());
 
     // Initialize and run the worker

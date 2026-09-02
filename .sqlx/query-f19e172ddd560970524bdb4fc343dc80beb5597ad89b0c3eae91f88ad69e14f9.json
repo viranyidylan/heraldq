@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO paddle_customers (paddle_customer_id, email)\n         VALUES ('ctm_fresh', '')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "f19e172ddd560970524bdb4fc343dc80beb5597ad89b0c3eae91f88ad69e14f9"
+}

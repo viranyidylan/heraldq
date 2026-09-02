@@ -92,6 +92,82 @@ pub async fn get_hmac_secret(
     .await
 }
 
+/// Look up a tenant by the lost-key recovery pair: the account email plus
+/// the HMAC secret shown alongside the API key at signup. The secret is the
+/// second factor only the tenant and heraldQ hold, so possession of it is
+/// proof-of-account without any email round trip.
+///
+/// Returns `None` for any mismatch — callers must respond identically for
+/// unknown emails and wrong secrets so recovery can't be used to probe
+/// which addresses have accounts.
+pub async fn find_tenant_for_recovery(
+    pool: &sqlx::PgPool,
+    email: &str,
+    hmac_secret: &str,
+) -> Result<Option<uuid::Uuid>, sqlx::Error> {
+    let row = sqlx::query_scalar!(
+        r#"SELECT id FROM tenants WHERE email = $1 AND hmac_secret = $2"#,
+        email,
+        hmac_secret,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// Deactivate every active key for a tenant. Rotation and recovery both
+/// revoke first, then issue exactly one replacement in the same
+/// transaction — there is never a moment with two live keys (rotation) or
+/// with the lost key still valid (recovery).
+pub async fn revoke_all_keys(
+    conn: &mut sqlx::PgConnection,
+    tenant_id: uuid::Uuid,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE api_keys SET is_active = false WHERE tenant_id = $1 AND is_active = true",
+        tenant_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+pub struct ApiKeyInfo {
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub created_at: chrono::DateTime<Utc>,
+    pub expires_at: Option<chrono::DateTime<Utc>>,
+    pub is_active: bool,
+}
+
+/// Key metadata for the authenticated tenant. Never returns hashes — there
+/// is nothing a customer can do with them and no reason to move them.
+pub async fn list_keys(
+    pool: &sqlx::PgPool,
+    tenant_id: uuid::Uuid,
+) -> Result<Vec<ApiKeyInfo>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"SELECT id, name, created_at, expires_at, is_active
+            FROM api_keys
+            WHERE tenant_id = $1
+            ORDER BY created_at DESC"#,
+        tenant_id,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| ApiKeyInfo {
+            id: r.id,
+            name: r.name.unwrap_or_else(|| "unnamed".into()),
+            created_at: r.created_at,
+            expires_at: r.expires_at,
+            is_active: r.is_active,
+        })
+        .collect())
+}
+
 /// `expires_at` is `None` for keys that live as long as the account does.
 pub async fn create_api_key(
     conn: &mut sqlx::PgConnection,

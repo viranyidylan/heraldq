@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) FROM api_keys ak\n         JOIN tenants t ON t.id = ak.tenant_id\n         WHERE t.email = 'rotate@test.invalid' AND ak.is_active = true",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "99a4aca37dbe54f079271ba5a3908d3fad3af82b0085dd7b81c6907efc144827"
+}
