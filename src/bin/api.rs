@@ -1,9 +1,8 @@
-use std::sync::Arc;
-
 use governor::{Quota, RateLimiter};
 use graphile_worker::WorkerUtils;
 use nonzero_ext::nonzero;
 use sliq::{AppState, config::AppConfig, db, routes, telemetry, webhook::ssrf};
+use std::sync::Arc;
 use tracing::info;
 
 /// API queries are short (auth lookup, quota bump, enqueue, list pages);
@@ -23,8 +22,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let utils = WorkerUtils::new(pg_pool.clone(), config.schema.clone());
 
-    // Per-tenant burst limiter: one token bucket per tenant_id, 10 req/s each.
-    let webhook_limiter = Arc::new(RateLimiter::keyed(Quota::per_second(nonzero!(10u32))));
+    // Per-tier rate limiters: one token-bucket set per tier (rates from the
+    // `tiers` module), tenants keyed within their tier's bucket.
+    let tier_rate_limits = sliq::TierRateLimits::new();
 
     // Global throttle on signup to limit invite-code abuse: 100/min across all clients.
     let signup_limiter = Arc::new(RateLimiter::direct(Quota::per_minute(nonzero!(100u32))));
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pg_pool,
         worker_utils: utils,
         schema: config.schema,
-        webhook_limiter,
+        tier_rate_limits,
         signup_limiter,
         policy: ssrf::policy(),
         paddle_webhook_secret: config.paddle_webhook_secret.clone(),

@@ -233,9 +233,15 @@ async fn apply_tier_to_tenant(
     paddle_customer_id: &str,
     tier: &str,
 ) -> Result<(), sqlx::Error> {
+    // Tier changes carry their enforcement parameters with them: a tenant
+    // that drops to free loses the long retention windows just as it loses
+    // the quota and rate limits (all defined in `tiers`).
+    let (delivered_days, dlq_days) = crate::tiers::retention_days(tier);
     sqlx::query!(
         r#"UPDATE tenants t
-            SET tier = $2::text::account_tier
+            SET tier = $2::text::account_tier,
+                delivered_retention_days = $3,
+                dlq_retention_days = $4
             FROM paddle_customers c
             WHERE c.paddle_customer_id = $1
               AND (t.id = c.tenant_id
@@ -244,6 +250,8 @@ async fn apply_tier_to_tenant(
                        AND t.email = c.email))"#,
         paddle_customer_id,
         tier,
+        delivered_days,
+        dlq_days,
     )
     .execute(conn)
     .await?;
@@ -294,10 +302,17 @@ pub async fn link_tenant_and_apply_tier(
     if let Some(row) = sub
         && let Some(tier) = effective_tier(&row.status, row.tier)
     {
+        let (delivered_days, dlq_days) = crate::tiers::retention_days(&tier);
         sqlx::query!(
-            r#"UPDATE tenants SET tier = $2::text::account_tier WHERE id = $1"#,
+            r#"UPDATE tenants
+                SET tier = $2::text::account_tier,
+                    delivered_retention_days = $3,
+                    dlq_retention_days = $4
+                WHERE id = $1"#,
             tenant_id,
             tier,
+            delivered_days,
+            dlq_days,
         )
         .execute(&mut *conn)
         .await?;

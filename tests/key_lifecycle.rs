@@ -29,9 +29,7 @@ fn app(pool: PgPool) -> axum::Router {
         signup_limiter: Arc::new(governor::RateLimiter::direct(governor::Quota::per_minute(
             nonzero_ext::nonzero!(100u32),
         ))),
-        webhook_limiter: Arc::new(governor::RateLimiter::keyed(governor::Quota::per_second(
-            nonzero_ext::nonzero!(10u32),
-        ))),
+        tier_rate_limits: sliq::TierRateLimits::new(),
         policy: sliq::webhook::ssrf::policy(),
         paddle_webhook_secret: None,
         paddle_api: None,

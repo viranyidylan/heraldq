@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ak.id, ak.tenant_id, ak.expires_at,\n                    t.tier::text AS \"tier!\",\n                    t.monthly_webhook_limit_override\n                FROM api_keys ak\n                JOIN tenants t ON t.id = ak.tenant_id\n                WHERE ak.key_hash = $1 AND ak.is_active = true",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "tier!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "monthly_webhook_limit_override",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null,
+      true
+    ]
+  },
+  "hash": "5b152450caee96be3b44dd235181caf60a63dac417c35dfc60dc2c1a4683394d"
+}

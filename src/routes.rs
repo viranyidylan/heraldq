@@ -116,9 +116,6 @@ fn cors_for_signup(origins: &[String]) -> tower_http::cors::CorsLayer {
         .allow_origin(AllowOrigin::list(allowed))
 }
 
-/// Per-tenant cap on webhooks enqueued per calendar month.
-const MONTHLY_WEBHOOK_LIMIT: i64 = 50_000;
-
 async fn ping(State(_state): State<AppState>) -> Result<&'static str, StatusCode> {
     Ok("pong")
 }
@@ -243,13 +240,18 @@ async fn enqueue_webhook(
     api_key: auth::ValidApiKey,
     extract::Json(request_body): extract::Json<WebhookRequest>,
 ) -> Result<(StatusCode, Json<EnqueueResponse>), AppError> {
-    info!(tenant_id = %api_key.tenant_id, "Webhook enqueue requested");
+    info!(tenant_id = %api_key.tenant_id, tier = %api_key.tier, "Webhook enqueue requested");
 
     // Intake funnel: every exit from this handler counts its outcome. The
     // 4xx status codes are already in heraldq_http_requests_total, but as
     // raw slices — outcome labels make "why are we rejecting" answerable
     // in one query (and quotable in the dashboard) without re-deriving it.
-    if state.webhook_limiter.check_key(&api_key.tenant_id).is_err() {
+    if state
+        .tier_rate_limits
+        .for_tier(&api_key.tier)
+        .check_key(&api_key.tenant_id)
+        .is_err()
+    {
         metrics::counter!("heraldq_webhooks_enqueued_total", "outcome" => "rate_limited")
             .increment(1);
         return Err(AppError::TooManyRequests);
@@ -263,12 +265,16 @@ async fn enqueue_webhook(
         return Err(e);
     }
 
-    // Hard monthly cap, atomically counted in the DB. Only valid requests that
-    // will actually enqueue should burn a quota slot.
+    // Hard monthly cap, atomically counted in the DB, sized by the tenant's
+    // tier. Only valid requests that will actually enqueue should burn a
+    // quota slot.
     if !crate::db::quotas::increment_monthly_quota(
         &state.pg_pool,
         api_key.tenant_id,
-        MONTHLY_WEBHOOK_LIMIT,
+        crate::tiers::effective_monthly_limit(
+            &api_key.tier,
+            api_key.monthly_webhook_limit_override,
+        ),
     )
     .await?
     {
@@ -688,9 +694,14 @@ async fn dlq_replay(
 ) -> Result<(StatusCode, Json<ReplayResponse>), AppError> {
     let tenant_id = api_key.tenant_id;
 
-    // Same per-tenant throttle as fresh enqueues: a replay is an outbound
+    // Same per-tier throttle as fresh enqueues: a replay is an outbound
     // webhook like any other.
-    if state.webhook_limiter.check_key(&tenant_id).is_err() {
+    if state
+        .tier_rate_limits
+        .for_tier(&api_key.tier)
+        .check_key(&tenant_id)
+        .is_err()
+    {
         return Err(AppError::TooManyRequests);
     };
 

@@ -35,10 +35,16 @@ fn extract_bearer_token(headers: &http::HeaderMap) -> Result<String, AppError> {
         .ok_or(AppError::Unauthorized)
 }
 
-#[allow(dead_code)]
 pub struct ValidApiKey {
+    #[allow(dead_code)]
     api_key_id: String,
     pub tenant_id: uuid::Uuid,
+    /// Account tier of the key's tenant, read on the same lookup — drives
+    /// per-tier quotas at enqueue time.
+    pub tier: String,
+    /// Negotiated quota for this tenant (enterprise/comped deals), or
+    /// `None` to use the tier default. Read on the same lookup.
+    pub monthly_webhook_limit_override: Option<i64>,
 }
 
 impl<S> FromRequestParts<S> for ValidApiKey
@@ -58,7 +64,12 @@ where
 
         let hash = hex::encode(Sha256::digest(auth_token.as_bytes()));
         let row = sqlx::query!(
-            "SELECT id, tenant_id, expires_at FROM api_keys WHERE key_hash = $1 AND is_active = true",
+            r#"SELECT ak.id, ak.tenant_id, ak.expires_at,
+                    t.tier::text AS "tier!",
+                    t.monthly_webhook_limit_override
+                FROM api_keys ak
+                JOIN tenants t ON t.id = ak.tenant_id
+                WHERE ak.key_hash = $1 AND ak.is_active = true"#,
             hash
         )
         .fetch_optional(&pg_pool)
@@ -75,6 +86,8 @@ where
         Ok(ValidApiKey {
             api_key_id: row.id.to_string(),
             tenant_id: row.tenant_id,
+            tier: row.tier,
+            monthly_webhook_limit_override: row.monthly_webhook_limit_override,
         })
     }
 }

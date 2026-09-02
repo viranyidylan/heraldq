@@ -53,12 +53,19 @@ pub async fn create_tenant(
     email: &str,
     hmac_secret: &str,
 ) -> Result<uuid::Uuid, AppError> {
+    // Retention is set explicitly for the free tier rather than left to the
+    // column defaults (30/90 days from migration 0009, which don't match the
+    // free tier's promised 1/7). Tier changes rewrite both columns.
+    let (delivered_days, dlq_days) = crate::tiers::retention_days("free");
     let row = sqlx::query!(
-        r#"INSERT INTO tenants (name, tier, email, hmac_secret)
-            VALUES ($1, 'free', $2, $3) RETURNING id"#,
+        r#"INSERT INTO tenants (name, tier, email, hmac_secret,
+                delivered_retention_days, dlq_retention_days)
+            VALUES ($1, 'free', $2, $3, $4, $5) RETURNING id"#,
         name,
         email,
         hmac_secret,
+        delivered_days,
+        dlq_days,
     )
     .fetch_one(conn)
     .await
