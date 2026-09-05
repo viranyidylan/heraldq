@@ -27,7 +27,7 @@ L (week+).
 | 9 | P1 | Worker reliability: remove `.expect()` panics, graceful SIGTERM drain | M | S–M | `.expect` in the worker is an incident waiting to happen (GTM list); worker needs the same drain-on-shutdown the API already has. |
 | 10 | P1 | Email infrastructure (transactional) | M | M | No outbound email at all today. Unblocks: signup key delivery fallback, payment receipts, quota warnings. |
 | 11 | P1 | ARCHITECTURE.md catch-up | L | S | Document paddle module, signup-first flow, CORS, hydration; keep it the authoritative orientation it claims to be. |
-| 12 | P2 | **Migrate Railway → AWS** | M | L | See scope sketch below. Driver: cost curve + control at scale; not urgent at current volume — decide deliberately. |
+| 12 | P2 | **Migrate Railway → AWS** | M | L | Scope sketch below. Migrate when ANY trigger fires, not before: (a) a paying customer is affected by a Railway outage, (b) MRR > $500/mo, or (c) Railway bill > $60/mo. Pre-work done first: Grafana Cloud scraping prod, Postgres backups verified on. |
 | 13 | P2 | Hot-path caching (api-key lookup, hmac secret) | M | S–M | Two DB round-trips per enqueue; fine now, first perf wall later. |
 | 14 | P2 | `Idempotency-Key` on `POST /v1/webhook` | M | S | At-least-once enqueue makes client retries duplicate deliveries; let clients opt into dedup. |
 | 15 | P2 | Encrypt / externally manage HMAC secrets | M | M | Per-tenant secrets sit plaintext in Postgres (GTM list). |
