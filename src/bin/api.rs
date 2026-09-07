@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // `tiers` module), tenants keyed within their tier's bucket.
     let tier_rate_limits = sliq::TierRateLimits::new();
 
-    // Global throttle on signup to limit invite-code abuse: 100/min across all clients.
+    // Global throttle on signup to limit mass-signup abuse: 100/min across all clients.
     let signup_limiter = Arc::new(RateLimiter::direct(Quota::per_minute(nonzero!(100u32))));
 
     let state = AppState {

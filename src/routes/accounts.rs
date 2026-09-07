@@ -9,15 +9,12 @@ use crate::{AppState, auth, error::AppError, paddle};
 
 /// Signup creates a free-tier tenant and returns credentials once.
 ///
-/// Signup is the front door: it is open (no invite code required), keys do
-/// not expire, and any Paddle customer already mirroring this email is
+/// Signup is the front door: it is open, keys do not expire, and any
+/// Paddle customer already mirroring this email is
 /// linked and its tier applied immediately — so billing state is consistent
 /// the moment the account exists, not at Paddle's next webhook.
 #[derive(Deserialize)]
 pub(super) struct SignupRequest {
-    /// Optional invite code. Absent codes are fine; a present-but-invalid
-    /// code is rejected so a typo'd code never silently loses its perk.
-    invite_code: Option<String>,
     name: String,
     email: String,
 }
@@ -65,11 +62,6 @@ pub(super) async fn signup(
     // autocapitalize; the linkage must not care.
     let email = body.email.trim().to_lowercase();
     let name = body.name.trim().to_owned();
-    let invite_code = body
-        .invite_code
-        .as_deref()
-        .map(str::trim)
-        .filter(|code| !code.is_empty());
 
     if name.is_empty() {
         metrics::counter!("heraldq_signups_total", "outcome" => "invalid").increment(1);
@@ -93,10 +85,6 @@ pub(super) async fn signup(
             }
             Err(e) => return Err(e),
         };
-
-    if let Some(invite_code) = invite_code {
-        crate::db::tenants::redeem_invite_code(&mut tx, invite_code, tenant_id).await?;
-    }
 
     // Keys don't expire: the product boundary is tier/quota enforcement,
     // not a time-based trial. A key that lapses mid-subscription would lock
