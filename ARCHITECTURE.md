@@ -424,7 +424,15 @@ src/
 ├── lib.rs              AppState, WorkerState, module root
 ├── config.rs           AppConfig (env parsing) + tests
 ├── error.rs            AppError → HTTP status mapping + tests
-├── routes.rs           All HTTP handlers + router setup
+├── routes/
+│   ├── mod.rs          router composition, middleware stack, CORS scoping,
+│   │                   /ping + /health, shared pagination
+│   ├── accounts.rs     POST /v1/signup + email validation
+│   ├── keys.rs         GET /v1/keys, POST /v1/keys/rotate, /v1/keys/recover
+│   ├── webhooks.rs     POST /v1/webhook, GET /v1/webhook/{id}, POST /v1/mock
+│   ├── dlq.rs          GET /v1/dlq, POST /v1/dlq/{id}/replay
+│   ├── stats.rs        GET /v1/deliveries, /v1/summary, /v1/dashboard
+│   └── billing.rs      POST /webhooks/paddle
 ├── telemetry.rs        tracing init, Prometheus exporter, metrics middleware,
 │                       queue-depth poller
 ├── views.rs            Inline HTML dashboard renderer
@@ -459,6 +467,15 @@ src/
 
 ## 16. Conventions & gotchas
 
+- **Handlers live in `routes/`, one module per resource.** `routes/mod.rs`
+  is composition only — if you are adding a handler body there, it belongs
+  in a submodule instead. Handlers are `pub(super)`: the router is the only
+  way in.
+- **CORS scoping is positional.** `route_layer` wraps only the routes
+  registered *before* it, so the two browser-facing routes (`/v1/signup`,
+  `/v1/keys/recover`) are declared in `build()` rather than in their own
+  modules. Adding a browser-callable route means adding it there, not just
+  anywhere.
 - **Names are split:** the crate/binary is `sliq`, the product is HeraldQ,
   the header is `HeraldQ-Signature`, the metrics prefix is `heraldq_`.
 - **Migration 0005 `TRUNCATE`s tenants** — it was a one-time schema reset for
