@@ -6,10 +6,9 @@ use axum::{
     routing::{get, post},
 };
 use chrono::Utc;
-use rand::RngExt;
 use reqwest::StatusCode;
 use serde::Serialize;
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::{
     AppState, WebhookRequest, auth,
@@ -21,7 +20,6 @@ pub(super) fn routes() -> Router<AppState> {
     Router::new()
         .route("/webhook", post(enqueue_webhook))
         .route("/webhook/{id}", get(webhook_status))
-        .route("/mock", post(mock))
 }
 
 #[derive(Serialize)]
@@ -183,29 +181,6 @@ pub(super) async fn webhook_status(
     }
 
     Err(AppError::NotFound)
-}
-
-pub(super) async fn mock(State(_state): State<AppState>) -> StatusCode {
-    let roll = rand::rng().random_range(0..100);
-
-    let status = if roll < 5 {
-        StatusCode::TOO_MANY_REQUESTS
-    } else if roll < 10 {
-        StatusCode::IM_A_TEAPOT
-    } else if roll < 20 {
-        StatusCode::REQUEST_TIMEOUT
-    } else if roll < 30 {
-        StatusCode::TOO_EARLY
-    } else if roll < 40 {
-        StatusCode::PERMANENT_REDIRECT
-    } else if roll < 85 {
-        StatusCode::INTERNAL_SERVER_ERROR
-    } else {
-        StatusCode::OK
-    };
-
-    debug!(roll, status = status.as_u16(), "Mock endpoint hit");
-    status
 }
 
 #[cfg(test)]

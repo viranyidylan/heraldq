@@ -6,7 +6,6 @@ pub mod paddle;
 pub mod routes;
 pub mod telemetry;
 pub mod tiers;
-pub mod views;
 pub mod webhook;
 
 use std::sync::Arc;
@@ -73,7 +72,7 @@ pub struct AppState {
     pub schema: String,
     pub tier_rate_limits: TierRateLimits,
     // Global throttle on the unauthenticated signup endpoint — caps total
-    // invite-code attempts to limit brute-force / mass-signup abuse.
+    // signup attempts to limit brute-force / mass-signup abuse.
     pub signup_limiter: Arc<DefaultDirectRateLimiter>,
     pub policy: HttpAcl,
     // Secret of the Paddle notification destination, used to verify
