@@ -122,7 +122,7 @@ Documented for customers in `docs/delivery-behavior.md` — change them together
 
 ## 4. Database schema
 
-SQLx migrations in `migrations/` (10 so far), checked into `.sqlx/` for
+SQLx migrations in `migrations/` (15 so far), checked into `.sqlx/` for
 offline compile-time validation (`SQLX_OFFLINE=true`).
 
 ### Application tables
@@ -131,7 +131,6 @@ offline compile-time validation (`SQLX_OFFLINE=true`).
 |---|---|---|
 | `tenants` | Account root | `id` (UUID), `tier` (enum), `email` (unique), `hmac_secret`, retention days |
 | `api_keys` | Hashed credentials | `key_hash` (SHA-256, unique), `expires_at`, `is_active` |
-| `beta_codes` | Optional invite codes (signup is open) | `code` (PK), `redeemed_at`, `redeemed_by_tenant_id`, CHECK constraint |
 | `tenant_monthly_quotas` | Usage cap | `(tenant_id, month_start)` PK, `webhook_count` |
 | `webhook_deliveries` | Success log | `id` (ULID), `payload` (JSONB), `delivered_at`, `attempts` |
 | `dead_letter_queue` | Failure log + replay | `id`, `failure_reason`, `replayed_at`, `replayed_as` |
@@ -332,7 +331,7 @@ level convention: `info!` milestones, `debug!` payloads/state, `trace!` noise.
 `IntoResponse`. Key principle: **internal details are logged but never leak
 into response bodies.** `sqlx::Error` and `GraphileWorkerError` map to a
 generic 500 with body "Internal server error" (tested explicitly). Domain
-errors (`Unauthorized`, `NotFound`, `AlreadyReplayed`, `InvalidInviteCode`,
+errors (`Unauthorized`, `NotFound`, `AlreadyReplayed`,
 `InvalidDestination`) map to precise status codes.
 
 ---
@@ -406,14 +405,15 @@ All under `/v1`, protected by Bearer auth unless noted.
 | GET | `/health` | no | Health JSON |
 | POST | `/webhooks/paddle` | HMAC signature | Paddle billing webhooks → dedup + mirror subscription state |
 | POST | `/v1/signup` | no (rate-limited) | Open tenant registration → returns API key + HMAC secret; links any existing Paddle customer and applies its tier |
+| GET | `/v1/keys` | yes | Key metadata (never hashes or raw values) |
+| POST | `/v1/keys/rotate` | yes | Revoke all keys, issue one replacement |
+| POST | `/v1/keys/recover` | no (rate-limited) | Lost-key recovery via email + HMAC secret |
 | POST | `/v1/webhook` | yes | Enqueue a webhook → `202 { id }` |
 | GET | `/v1/webhook/{id}` | yes | Status (delivered / failed / pending) |
 | GET | `/v1/deliveries` | yes | Paginated success history |
 | GET | `/v1/dlq` | yes | Paginated dead-letter queue |
 | POST | `/v1/dlq/{id}/replay` | yes | Re-enqueue a DLQ entry → `202 { id, replayed_from }` |
 | GET | `/v1/summary` | yes | JSON activity summary |
-| GET | `/v1/dashboard` | yes | Inline HTML dashboard |
-| POST | `/v1/mock` | no | Chaos endpoint for testing (random status codes) |
 
 ---
 
@@ -429,13 +429,12 @@ src/
 │   │                   /ping + /health, shared pagination
 │   ├── accounts.rs     POST /v1/signup + email validation
 │   ├── keys.rs         GET /v1/keys, POST /v1/keys/rotate, /v1/keys/recover
-│   ├── webhooks.rs     POST /v1/webhook, GET /v1/webhook/{id}, POST /v1/mock
+│   ├── webhooks.rs     POST /v1/webhook, GET /v1/webhook/{id}
 │   ├── dlq.rs          GET /v1/dlq, POST /v1/dlq/{id}/replay
-│   ├── stats.rs        GET /v1/deliveries, /v1/summary, /v1/dashboard
+│   ├── stats.rs        GET /v1/deliveries, /v1/summary
 │   └── billing.rs      POST /webhooks/paddle
 ├── telemetry.rs        tracing init, Prometheus exporter, metrics middleware,
 │                       queue-depth poller
-├── views.rs            Inline HTML dashboard renderer
 ├── bin/
 │   ├── api.rs          API server entry point
 │   └── worker.rs       Worker entry point
@@ -454,7 +453,7 @@ src/
 │   └── ssrf.rs         validate_destination, SecureResolver, policy + tests
 └── db/
     ├── mod.rs          pool creation, migrations
-    ├── tenants.rs      create_tenant, invite redemption, api_keys, hmac secret
+    ├── tenants.rs      create_tenant, api_keys, hmac secret, recovery lookup
     ├── quotas.rs       atomic monthly quota increment
     ├── jobs.rs         pending-job lookup via graphile private schema
     ├── deliveries.rs   success log CRUD (idempotent insert)

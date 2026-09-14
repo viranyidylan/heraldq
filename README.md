@@ -18,7 +18,6 @@ Accepts incoming webhook requests and enqueues them as durable jobs via `WorkerU
 | `GET /ping` | Liveness check |
 | `GET /health` | Health check (JSON) |
 | `POST /webhook` | Enqueue a webhook dispatch job |
-| `POST /mock` | Chaos endpoint — returns 200 (10%), 418 (5%), 500 (85%) |
 
 ### `worker` (graphile_worker consumer)
 Polls the job queue and dispatches `POST` requests to the destination URL.
@@ -63,7 +62,7 @@ To sign up and receive an API key
 ```bash
 curl -X POST your-service.com/v1/signup \
   -H 'Content-Type: application/json' \
-  -d '{"name": "My Company", "email": "you@example.com", "invite_code":"BETA-XXXX" }'
+  -d '{"name": "My Company", "email": "you@example.com" }'
 ```
 
 Example payload
@@ -77,8 +76,8 @@ curl -w "%{http_code}\n" \
 ```
 
 Note the destination must be publicly routable — the SSRF guard rejects
-localhost and private IPs, so `http://localhost:3000/mock` is refused with a
-400. That is the guard working, not a bug.
+localhost and private IPs, so `http://localhost:3000/anything` is refused
+with a 400. That is the guard working, not a bug.
 
 ## Observability
 

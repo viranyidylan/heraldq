@@ -26,10 +26,6 @@ pub enum AppError {
     JobEnqueue(#[from] GraphileWorkerError),
 
     // --- auth / signup ---
-    #[error("invalid invite code")]
-    InvalidInviteCode,
-    #[error("invite code already redeemed")]
-    InviteCodeAlreadyRedeemed,
     #[error("email already registered")]
     EmailAlreadyRegistered,
     #[error("name is required")]
@@ -66,10 +62,6 @@ impl IntoResponse for AppError {
             Self::JobEnqueue(ref e) => {
                 error!(error = ?e, "job enqueue error");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
-            Self::InvalidInviteCode => (StatusCode::BAD_REQUEST, "invalid invite code"),
-            Self::InviteCodeAlreadyRedeemed => {
-                (StatusCode::CONFLICT, "invite code already redeemed")
             }
             Self::EmailAlreadyRegistered => (
                 StatusCode::CONFLICT,
@@ -129,12 +121,6 @@ mod tests {
     #[tokio::test]
     async fn email_already_registered_is_409() {
         let response = AppError::EmailAlreadyRegistered.into_response();
-        assert_eq!(response.status(), StatusCode::CONFLICT);
-    }
-
-    #[tokio::test]
-    async fn invite_code_already_redeemed_is_409() {
-        let response = AppError::InviteCodeAlreadyRedeemed.into_response();
         assert_eq!(response.status(), StatusCode::CONFLICT);
     }
 

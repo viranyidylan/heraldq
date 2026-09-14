@@ -3,7 +3,6 @@
 use axum::{
     Json, Router,
     extract::{Query, State},
-    response::Html,
     routing::get,
 };
 use serde::Serialize;
@@ -19,7 +18,6 @@ pub(super) fn routes() -> Router<AppState> {
     Router::new()
         .route("/deliveries", get(deliveries))
         .route("/summary", get(webhook_activity_summary))
-        .route("/dashboard", get(dashboard))
 }
 
 pub(super) async fn webhook_activity_summary(
@@ -29,15 +27,6 @@ pub(super) async fn webhook_activity_summary(
     let summary = crate::db::stats::activity_summary(&state.pg_pool, api_key.tenant_id).await?;
 
     Ok(Json(summary))
-}
-
-pub(super) async fn dashboard(
-    State(state): State<AppState>,
-    api_key: auth::ValidApiKey,
-) -> Result<Html<String>, AppError> {
-    let counts = crate::db::stats::activity_summary(&state.pg_pool, api_key.tenant_id).await?;
-
-    Ok(Html(crate::views::render_dashboard(&counts)))
 }
 
 #[derive(Serialize)]

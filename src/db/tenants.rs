@@ -2,51 +2,6 @@ use chrono::{DateTime, Utc};
 
 use crate::error::AppError;
 
-// 3e — smoke test: valid code → 201; invalid code → 400; reused code → 400
-
-pub async fn redeem_invite_code(
-    // conn: &Transaction<'_, Postgres>,
-    conn: &mut sqlx::PgConnection,
-    invite_code: &str,
-    tenant_id: uuid::Uuid,
-) -> Result<String, AppError> {
-    // update beta_codes
-    // set redeemed_at, redeemed_by_tenant_id
-    // where the code = sign_up code
-    // and redeemed_at IS NULL and expires_at
-    // returning CODE
-    let result = sqlx::query!(
-        r#"UPDATE beta_codes
-            SET redeemed_at = NOW(),
-                redeemed_by_tenant_id = $2
-            WHERE code = $1
-                AND redeemed_at IS NULL
-                AND (expires_at IS NULL OR expires_at > NOW())
-            RETURNING code"#,
-        invite_code,
-        tenant_id,
-    )
-    .fetch_optional(&mut *conn)
-    .await?;
-
-    if let Some(row) = result {
-        return Ok(row.code);
-    }
-
-    // UPDATE matched zero rows — disambiguate: is the code missing/expired, or already redeemed?
-    let existing = sqlx::query!(
-        r#"SELECT redeemed_at FROM beta_codes WHERE code = $1"#,
-        invite_code,
-    )
-    .fetch_optional(&mut *conn)
-    .await?;
-
-    match existing {
-        Some(row) if row.redeemed_at.is_some() => Err(AppError::InviteCodeAlreadyRedeemed),
-        _ => Err(AppError::InvalidInviteCode),
-    }
-}
-
 pub async fn create_tenant(
     conn: &mut sqlx::PgConnection,
     name: &str,
